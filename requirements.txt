@@ -1,9 +1,4 @@
-# MISP-QEKS Model Training Requirements
-# Python >= 3.8
-# PyTorch >= 1.10
-# CUDA >= 11.3
-
-# Core Dependencies
+# Core ML
 torch>=1.10.0
 torchvision>=0.11.0
 torchaudio>=0.10.0
@@ -25,6 +20,24 @@ pytorch-optimizer>=0.0.1a11
 
 # Audio Processing
 openai-whisper>=20230314
+librosa>=0.10.0
+soundfile>=0.12.0
 
-# Development (optional but recommended)
+# Video/Image Processing
+opencv-python>=4.5.0
+ffmpeg-python>=0.2.1
+
+# NLP Models
+transformers>=4.20.0
+g2p-en>=2.1.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.12.0
+
+# HuggingFace
+datasets>=2.10.0
+huggingface-hub>=0.14.0
+
+# Development
 tensorboard>=2.8.0
