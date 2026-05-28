@@ -103,7 +103,7 @@ def TextEncoder(text, g2p=g2p):
 def VideoEncoder(lip, network=CNN_Resnet):
     lip = lip.to(torch.float32)
     gray_lip, _ = GrayCropFlip(lip)
-    batched_gray_lip = gray_lip.unsqueeze(0)
+    batched_gray_lip = gray_lip.unsqueeze(1)
     lip_embed = network(batched_gray_lip)
     return lip_embed
 
@@ -213,7 +213,7 @@ for snr in snr_list:
         # video feature
         if not os.path.exists(anc_vide_fea_path):
             vid_frames, _, _ = torchvision.io.read_video(anc_lip_path, pts_unit='sec')
-            anc_lip = vid_frames.permute(0, 3, 1, 2).cuda() # Changes (T, H, W, C) to (T, C, H, W)
+            anc_lip = vid_frames.cuda()
             anc_vide_fea = VideoEncoder(anc_lip).detach().cpu().numpy()
             directory = os.path.dirname(anc_vide_fea_path)
             os.makedirs(directory, exist_ok=True)
@@ -221,7 +221,7 @@ for snr in snr_list:
 
         if not os.path.exists(com_vide_fea_path):
             vid_frames, _, _ = torchvision.io.read_video(com_lip_path, pts_unit='sec')
-            com_lip = vid_frames.permute(0, 3, 1, 2).cuda()
+            com_lip = vid_frames.cuda()
             com_vide_fea = VideoEncoder(com_lip).detach().cpu().numpy()
             directory = os.path.dirname(com_vide_fea_path)
             os.makedirs(directory, exist_ok=True)
