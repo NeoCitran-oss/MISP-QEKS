@@ -16,9 +16,10 @@ prefix = 'eval' # dev; eval
 scp = f'/local/scratch/linna/MISP/MISP_data/MISP-QEKS/raw_dicts/eval_seen/raw_eval_seen.scp'
 fea_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/features/{prefix}/'
 npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/'
+noisy_wav_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/noisy_wav/{prefix}/'
 
 
-snr_list = [3, 6, 9] # for train;  [5, 0, -5, -10] for dev & eval
+snr_list = [5, 0, -5, -10] # for dev & eval [3, 6, 9] for train;  
 
 noise_root = '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/noise'
 noise_list = ['Home',
@@ -139,7 +140,7 @@ with open(scp) as f:
     lines = f.readlines()
 
 for snr in snr_list:
-    wav_save_dir = f'/path/noisy_wav/{prefix}_{snr}db/'
+    wav_save_dir = f'{noisy_wav_save_dir}{prefix}_{snr}db/'
     
     seed += 1
 
