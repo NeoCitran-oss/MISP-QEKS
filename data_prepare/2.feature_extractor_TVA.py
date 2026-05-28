@@ -20,6 +20,7 @@ npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/
 
 snr_list = [3, 6, 9] # for train;  [5, 0, -5, -10] for dev & eval
 
+noise_root = '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/noise'
 noise_list = ['Home',
               'Music',
               'TV',
@@ -27,6 +28,10 @@ noise_list = ['Home',
               'WindAirCon',
               'WindFan',
               'babble_noise']
+noise_dir_map = {
+    'Home': 'GenHome',
+    'Music': 'GenMusic',
+}
 
 choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 
@@ -149,9 +154,12 @@ for snr in snr_list:
         sample_width, frame_rate, clean_com_wav = read_audio(com_wav_path)
         sample_width, frame_rate, clean_anc_wav = read_audio(anc_wav_path)
         
-        noise_corpus = random.choices(noise_list, weights=choose_weights, k=1)[0]
+        noise_name = random.choices(noise_list, weights=choose_weights, k=1)[0]
+        noise_corpus = os.path.join(noise_root, noise_dir_map.get(noise_name, noise_name))
 
-        noise_wav_list = os.listdir(noise_corpus)
+        noise_wav_list = [wav for wav in os.listdir(noise_corpus) if wav.endswith('.wav')]
+        if not noise_wav_list:
+            raise FileNotFoundError(f"No .wav files found in noise directory: {noise_corpus}")
         noise_wav_path = os.path.join(noise_corpus, random.choice(noise_wav_list))
         _, _, noise_wav = read_audio(noise_wav_path)
 
