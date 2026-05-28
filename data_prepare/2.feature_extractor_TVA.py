@@ -4,7 +4,7 @@ import numpy as np
 import random
 import wave
 from tqdm import tqdm
-
+import torchvision
 import whisper
 from g2p.g2p_en.g2p import G2p
 from lipreading.video_encoder import GrayCropFlip, CNN_Resnet
@@ -13,7 +13,7 @@ seed = 42
 random.seed(seed)
 
 prefix = 'eval' # dev; eval
-scp = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list/dataset_list/{prefix}_tva_1word.scp'
+scp = f'/local/scratch/linna/MISP/MISP_data/MISP-QEKS/raw_dicts/eval_seen/raw_eval_seen.scp'
 fea_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/features/{prefix}/'
 npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/'
 
@@ -203,14 +203,16 @@ for snr in snr_list:
 
         # video feature
         if not os.path.exists(anc_vide_fea_path):
-            anc_lip = torch.load(anc_lip_path).cuda()
+            vid_frames, _, _ = torchvision.io.read_video(anc_lip_path, pts_unit='sec')
+            anc_lip = vid_frames.permute(0, 3, 1, 2).cuda() # Changes (T, H, W, C) to (T, C, H, W)
             anc_vide_fea = VideoEncoder(anc_lip).detach().cpu().numpy()
             directory = os.path.dirname(anc_vide_fea_path)
             os.makedirs(directory, exist_ok=True)
             np.save(anc_vide_fea_path, anc_vide_fea)
 
         if not os.path.exists(com_vide_fea_path):
-            com_lip = torch.load(com_lip_path).cuda()
+            vid_frames, _, _ = torchvision.io.read_video(com_lip_path, pts_unit='sec')
+            com_lip = vid_frames.permute(0, 3, 1, 2).cuda()
             com_vide_fea = VideoEncoder(com_lip).detach().cpu().numpy()
             directory = os.path.dirname(com_vide_fea_path)
             os.makedirs(directory, exist_ok=True)
