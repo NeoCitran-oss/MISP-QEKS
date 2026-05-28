@@ -12,10 +12,10 @@ from lipreading.video_encoder import GrayCropFlip, CNN_Resnet
 seed = 42
 random.seed(seed)
 
-prefix = 'train' # dev; eval
-scp = f'/your_path/dataset_list/{prefix}_tva_1word.scp'
-fea_save_dir = f'/your_path/features/{prefix}/'
-npy_save_dir = f'/your_path/npy/{prefix}/'
+prefix = 'eval' # dev; eval
+scp = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list/dataset_list/{prefix}_tva_1word.scp'
+fea_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/features/{prefix}/'
+npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/'
 
 
 snr_list = [3, 6, 9] # for train;  [5, 0, -5, -10] for dev & eval
@@ -33,7 +33,7 @@ choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 # wav encoder
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using:", device)
-whisper_enc = whisper.load_model("./whisper/ckps/tiny.pt")
+whisper_enc = whisper.load_model("/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/whisper/ckps/tiny.pt")
 whisper_enc = whisper_enc.to(device)
 
 # text encoder
@@ -43,7 +43,7 @@ g2p = G2p()
 CNN_Resnet = CNN_Resnet(output_dim=256)
 GrayCropFlip = GrayCropFlip(channel_input='rgb')
 GrayCropFlip.to(device)
-checkpoint_pretrain = torch.load('.lipreading/lipreading_LRW_0.8018.pt', map_location=device)
+checkpoint_pretrain = torch.load('/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/lipreading/lipreading_LRW_0.8018.pt', map_location=device)
 CNN_Resnet.load_state_dict(checkpoint_pretrain)
 CNN_Resnet.to(device)
 
