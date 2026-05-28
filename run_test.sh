@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=0 python test.py \
 --test_snrs 5,0,-5,-10 \
 --network 'TVA_KWS_PLCL_AVmask' \
 --datalist_dir '/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list' \
---eval_csv 'test_inset,test_outset' \
+--eval_csv 'eval_inset,eval_outset' \
 --prob_addNoise 1.0 \
 --model_path '/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/train/model/' \
 --out_dir './test_epoch10/' \
