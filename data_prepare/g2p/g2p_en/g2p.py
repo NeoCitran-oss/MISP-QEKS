@@ -28,12 +28,11 @@ sys.path.append(os.path.dirname(__file__))
 from expand import normalize_numbers
 # from cmudic import cmudict
 
-try:
-    # nltk.data.find('taggers/averaged_perceptron_tagger.zip')
-    nltk.data.find('/work2/asrkws/shicheng2/Multimodal_KWS/dataPrepare/FeatExtract/g2p/g2p_en/averaged_perceptron_tagger.zip')
-    
-except LookupError:
-    nltk.download('averaged_perceptron_tagger')
+for tagger_resource in ('averaged_perceptron_tagger_eng', 'averaged_perceptron_tagger'):
+    try:
+        nltk.data.find(f'taggers/{tagger_resource}')
+    except LookupError:
+        nltk.download(tagger_resource)
 
 try:
     # nltk.data.find('corpora/cmudict.zip')
