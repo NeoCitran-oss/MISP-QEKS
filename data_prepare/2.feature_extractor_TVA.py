@@ -181,7 +181,7 @@ for snr in snr_list:
         com_lip_path  = sample['com_lip_path']
 
         label = sample['label']
-        datatype = sample['data_type']
+        datatype = sample['type']
         new_file_scp = []
 
 
