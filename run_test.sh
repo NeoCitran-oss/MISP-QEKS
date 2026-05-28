@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=0 python test.py \
 --datalist_dir '/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list' \
 --eval_csv 'eval_inset,eval_outset' \
 --prob_addNoise 1.0 \
---model_path '/local/scratch/linna/MISP/MISP_dataset/MISP-QEKS/train/model/' \
+--model_path '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/train/model/' \
 --out_dir './test_epochall/' \
 --maxlen_text 40 \
 --maxlen_vide 50 \
