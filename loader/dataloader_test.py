@@ -153,14 +153,22 @@ class LipReading2Dataset(Dataset):
 
 
         ## video feature
-        anc_vide_fea = np.load(feature_data['anc_vide_fea_path'])
-        if anc_vide_fea.shape[0] == 1:
-            anc_vide_fea = anc_vide_fea.squeeze(0)
-        anc_vide_fea = torch.tensor(anc_vide_fea).cpu().detach()
-        com_vide_fea = np.load(feature_data['com_vide_fea_path'])
-        if com_vide_fea.shape[0] == 1:
-            com_vide_fea = com_vide_fea.squeeze(0)
-        com_vide_fea = torch.tensor(com_vide_fea).cpu().detach()
+        def load_video_feature(path):
+            video_fea = np.load(path)
+            video_fea = torch.as_tensor(video_fea).cpu().detach()
+            if video_fea.ndim == 3:
+                if video_fea.shape[1] == 1:
+                    video_fea = video_fea.squeeze(1)
+                elif video_fea.shape[0] == 1:
+                    video_fea = video_fea.squeeze(0)
+                else:
+                    raise ValueError(f"Unsupported video feature shape {tuple(video_fea.shape)} for {path}")
+            if video_fea.ndim != 2:
+                raise ValueError(f"Unsupported video feature shape {tuple(video_fea.shape)} for {path}")
+            return video_fea
+
+        anc_vide_fea = load_video_feature(feature_data['anc_vide_fea_path'])
+        com_vide_fea = load_video_feature(feature_data['com_vide_fea_path'])
 
         
         len_anc_lip = anc_vide_fea.shape[0]
