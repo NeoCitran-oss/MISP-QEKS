@@ -120,6 +120,11 @@ class LipReading2Dataset(Dataset):
         com_phn_list = feature_data['com_phn_list']
         com_text_fea = feature_data['com_text_fea']
 
+        if not torch.is_tensor(anc_text_fea):
+            anc_text_fea = torch.from_numpy(np.asarray(anc_text_fea))
+        if not torch.is_tensor(com_text_fea):
+            com_text_fea = torch.from_numpy(np.asarray(com_text_fea))
+
         anc_phn_list = torch.tensor([self.p2idx[t] for t in anc_phn_list])
         com_phn_list = torch.tensor([self.p2idx[t] for t in com_phn_list])
 
