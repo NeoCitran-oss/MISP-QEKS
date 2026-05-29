@@ -1,11 +1,10 @@
-source /home3/asrkws/shicheng2/bashrc_multimodal_kws
 CUDA_VISIBLE_DEVICES=0 python test.py \
 --bgn_epoch 9 \
 --end_epoch 9 \
 --batch_size 1 \
 --test_snrs 5,0,-5,-10 \
 --network 'TVA_KWS_PLCL_AVmask' \
---datalist_dir '/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list' \
+--datalist_dir '/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/eval' \
 --eval_csv 'eval_inset,eval_outset' \
 --prob_addNoise 1.0 \
 --model_path '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/train/model/' \

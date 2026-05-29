@@ -189,8 +189,8 @@ def test(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--test_snrs',     type=str,   default='0,5,10')
-    parser.add_argument('--eval_csv',      type=str,   default='testeasy_tva,testhard_tva')
-    parser.add_argument('--datalist_dir',  type=str,   default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/dataset_list')
+    parser.add_argument('--eval_csv',      type=str,   default='eval_inset,eval_outset')
+    parser.add_argument('--datalist_dir',  type=str,   default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/eval')
     parser.add_argument('--prob_addNoise', type=float, default=1.0)
     parser.add_argument('--batch_size',     type=int,   default=16, help='Max sentence number used for training and testing')
     parser.add_argument('--bgn_epoch',     type=int,   default=2)
