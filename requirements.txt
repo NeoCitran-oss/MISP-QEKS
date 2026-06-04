@@ -19,15 +19,17 @@ tabulate>=0.8.0
 pytorch-optimizer>=0.0.1a11
 
 # Audio Processing
-openai-whisper>=20230314
 librosa>=0.10.0
 soundfile>=0.12.0
 
 # Video/Image Processing
 opencv-python>=4.5.0
 
-# NLP Models
-transformers>=4.20.0
+# NLP Models / Audio backbone
+# transformers >= 4.45 is required for the Qwen2-Audio audio encoder
+# (Qwen2AudioForConditionalGeneration / Qwen2AudioEncoder).
+transformers>=4.45.0
+accelerate>=0.26.0
 g2p-en>=2.1.0
 
 # Visualization

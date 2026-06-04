@@ -5,9 +5,9 @@ import random
 import wave
 from tqdm import tqdm
 import torchvision
-import whisper
 from g2p.g2p_en.g2p import G2p
 from lipreading.video_encoder import GrayCropFlip, CNN_Resnet
+from qwen_audio_encoder import QwenAudioEncoder
 
 seed = 42
 random.seed(seed)
@@ -28,8 +28,7 @@ choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using:", device)
 
-whisper_enc = whisper.load_model("/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/whisper/ckps/tiny.pt").to(device)
-whisper_enc.eval()
+qwen_enc = QwenAudioEncoder(model_id="Qwen/Qwen2-Audio-7B", device=device, max_frames=100)
 g2p = G2p()
 
 CNN_Resnet = CNN_Resnet(output_dim=256)
@@ -58,13 +57,10 @@ def write_audio(audio_data, audio_name):
     wave_file.writeframes(audio_data_int16.tobytes())
     wave_file.close()
 
-def AudioEncoder(audio, whisper_enc=whisper_enc):
-    with torch.no_grad():
-        audio = whisper.pad_or_trim(torch.from_numpy(audio).to(torch.float32))
-        mel = whisper.log_mel_spectrogram(audio).to(whisper_enc.device)
-        mel = mel.unsqueeze(0)
-        audio_embed = whisper_enc.encoder(mel)  
-        return audio_embed.cpu().detach()[:, :100, :].numpy() # Return numpy array
+def AudioEncoder(audio, qwen_enc=qwen_enc):
+    # `audio` is already float32 normalized to [-1, 1] by audioAddNoiseScale.
+    audio_embed = qwen_enc.encode(audio)  # [1, <=100, 1280]
+    return audio_embed.numpy()  # Return numpy array
 
 def TextEncoder(text, g2p=g2p):
     return g2p(text), torch.from_numpy(g2p.embedding(text)).numpy()
