@@ -16,6 +16,11 @@ import torch.nn.functional as F
 
 sys.path.append(os.path.dirname(__file__))
 
+# Number of input samples (@16 kHz) per audio encoder frame.
+# The Qwen2-Audio audio tower emits one frame every 640 samples (40 ms, 25 fps)
+# because of its trailing AvgPool1d(2). (Whisper-tiny was 320 samples / 50 fps.)
+AUDIO_FRAME_STRIDE = 640
+
 
 class LipReading2Dataset(Dataset):
     def __init__(self,
@@ -161,11 +166,6 @@ class LipReading2Dataset(Dataset):
         com_vide_mask = torch.ones((self.maxlen_vide, 1))
         com_vide_mask[len_com_lip:, :] = 0
 
-        anc_vide_mask = torch.ones((self.maxlen_vide, 1)) # 16khz 
-        anc_vide_mask[len_anc_lip:, :] = 0
-        com_vide_mask = torch.ones((self.maxlen_vide, 1))
-        com_vide_mask[len_com_lip:, :] = 0
-
         # 视频embed统一补成2s长
         T_anc, C_anc = anc_vide_fea.shape
         if T_anc < self.maxlen_vide:
@@ -215,8 +215,8 @@ class LipReading2Dataset(Dataset):
         com_fa_path = feature_data['com_wav_path'].replace('/wav/', '/fa_data/').replace('_wav', '').replace('.wav', '.TextGrid')
 
         ##  audio
-        k_anc = math.ceil(len(anc_wav) / 320) # 16khz 
-        k_com = math.ceil(len(com_wav) / 320)
+        k_anc = math.ceil(len(anc_wav) / AUDIO_FRAME_STRIDE) # 16khz 
+        k_com = math.ceil(len(com_wav) / AUDIO_FRAME_STRIDE)
         anc_audi_mask = torch.ones((self.maxlen_audi, 1)) 
         anc_audi_mask[k_anc:, :] = 0
         com_audi_mask = torch.ones((self.maxlen_audi, 1))

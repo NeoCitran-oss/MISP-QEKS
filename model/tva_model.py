@@ -15,6 +15,10 @@ from model.transformer2 import Transformer_self, Transformer_cross, Transformer_
 
 from library.tools.creation import *
 
+# Hidden size of the audio features produced by the Qwen2-Audio audio encoder
+# (whisper-large-v3 width). Previously this was 384 for the Whisper-tiny encoder.
+AUDIO_FEAT_DIM = 1280
+
 
 def compute_weighted_mse_loss(audi_embedding, text_embedding):
     kernel = torch.from_numpy(np.array([0.05448868, 0.24420134, 0.40261995, 0.24420134, 0.05448868])).float().reshape(-1)
@@ -85,11 +89,11 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
         self.Vide_Proj = Projection(input_dim=256, output_dim=128)
         
         # Auido Projection
-        self.Audi_ErlProj = Projection(input_dim=384, output_dim=128)
-        self.Audi_QryProj = Projection(input_dim=384, output_dim=128)
+        self.Audi_ErlProj = Projection(input_dim=AUDIO_FEAT_DIM, output_dim=128)
+        self.Audi_QryProj = Projection(input_dim=AUDIO_FEAT_DIM, output_dim=128)
 
-        self.transformer_V_CAFE = CrossModalAttention()
-        self.denoise_masking = NoiseReductionMask()
+        self.transformer_V_CAFE = CrossModalAttention(audio_dim=AUDIO_FEAT_DIM)
+        self.denoise_masking = NoiseReductionMask(embed_dim=AUDIO_FEAT_DIM)
 
         self.mm_adapter = MultiModalAdapter(embed_dim=128, num_heads=1, dropout=0.0)
         # self.mm_adapter = Transformer_encoder(d_model = 128, nlayers = 2, nhead = 1, dim_feedforward = 512, dropout=0.1) # self attention
@@ -111,7 +115,12 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
         self.idx2p        = {idx: p for idx, p in enumerate(self.phonemes)}
         self.rng          = np.random.default_rng(42)
 
-        self.gaussian_kernel = gaussian_kernel(self.kernel_size, self.sigma).view(1, 1, self.kernel_size, self.kernel_size).cuda()
+        # Registered as a buffer so it follows the module's device (.cuda()/.cpu())
+        # instead of being pinned to GPU at construction time.
+        self.register_buffer(
+            'gaussian_kernel',
+            gaussian_kernel(self.kernel_size, self.sigma).view(1, 1, self.kernel_size, self.kernel_size)
+        )
 
         # Attention Layers
         self.transformer_ta = Transformer_cross(embed_size = self.maxlen_audi, num_layers = 1, num_heads = 1, ff_hidden_size = 100, dropout = 0.1)
