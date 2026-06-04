@@ -34,7 +34,6 @@ from library.utils.message import Message, LogType, get_log_header
 from library.train_helper import get_module, printer
 
 from tabulate import tabulate
-import whisper
 from model.lipreading import video_encoder
 
 
@@ -193,7 +192,7 @@ def train(args, LOG):
         if args.optimizer == 'ADAM':
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
         elif args.optimizer == 'RANGER':
-            optimizer = Ranger(filter(lambda p: p.requires_grad, model.train_module.parameters()), lr=args.lr)
+            optimizer = Ranger(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
         else:
             optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, momentum=0.9, weight_decay=0.0, nesterov=True)
 
@@ -545,7 +544,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr',             type=float, default=0.001, help='Learning rate for train')
     parser.add_argument('--epochs',         type=int,   default=8, help='Number of training epochs')
     parser.add_argument('--batch_size',     type=int,   default=16, help='Max sentence number used for training and testing')
-    parser.add_argument('--network',        type=str,   default='mmKWS_PLCL_4data', help='Deep learning model architecture used')
+    parser.add_argument('--network',        type=str,   default='TVA_KWS_PLCL_AVmask', help='Deep learning model architecture used')
     parser.add_argument('--lr_half_epochs', type=str,   default='2,3,4,5,6,7,8,9', help='Index of training epoch to half learning rate, eg: 3,4,5,6,7')
     parser.add_argument('--seed',           type=int,   default=27863875, help='Seed for init pytorch network and dataloader')
     parser.add_argument('--net_init_seed',  type=int,   default=27863875, help='Seed for init pytorch network, especially for multigpu init')

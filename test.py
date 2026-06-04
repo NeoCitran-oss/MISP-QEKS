@@ -35,7 +35,6 @@ from library.utils.message import Message, LogType, get_log_header
 from library.train_helper import get_module, printer
 
 from tabulate import tabulate
-import whisper
 from model.lipreading import video_encoder
 
 
