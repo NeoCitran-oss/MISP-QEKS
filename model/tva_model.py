@@ -141,6 +141,8 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
         # Classification Layers
         self.fc_t_a    = nn.Linear(100, 1)  # Text <----> Audi
         self.fc_t_v    = nn.Linear(100, 1)  # Text <----> Vide
+        self.fc_v_v    = nn.Linear(100, 1)  # Video <----> Video
+        self.fc_v_a    = nn.Linear(100, 1)  # Video <----> Audi
         self.fc_a_a    = nn.Linear(100, 1)  # Audi <----> Audi
         self.fc_a_v    = nn.Linear(100, 1)  # Audi <----> Vide
         self.fc_ta_a   = nn.Linear(200, 1)  # Text + Audi <----> Audi
@@ -155,8 +157,59 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
         self.Contra_Loss = ContrastiveLoss_mask()   # Contrastive Loss
         self.MSE_Loss    = nn.MSELoss()
         self.KLD_Loss    = AudioKLDLoss()
-    
-    def forward(self, data, meta, fa_path, modality='ta_va'):
+
+    PAIR_SCORE_NAMES = ('t_v', 't_a', 'v_v', 'v_a', 'a_v', 'a_a')
+
+    def pair_score_heads(self):
+        return {
+            't_v': self.fc_t_v,
+            't_a': self.fc_t_a,
+            'v_v': self.fc_v_v,
+            'v_a': self.fc_v_a,
+            'a_v': self.fc_a_v,
+            'a_a': self.fc_a_a,
+        }
+
+    def init_score_fusion_heads_from_checkpoint(self):
+        """Warm-start v-v / v-a heads from trained a-a / t-a heads (for score fusion)."""
+        self.fc_v_v.load_state_dict(self.fc_a_a.state_dict())
+        self.fc_v_a.load_state_dict(self.fc_t_a.state_dict())
+
+    def fuse_pair_scores(self, pair_embeddings, weights=None, method='weighted_mean'):
+        heads = self.pair_score_heads()
+        if weights is None:
+            weights = {name: 1.0 for name in heads}
+
+        logits = []
+        component_logits = {}
+        total_weight = 0.0
+        for name, head in heads.items():
+            w = float(weights.get(name, 0.0))
+            if w <= 0.0:
+                continue
+            logit = head(pair_embeddings[name])
+            component_logits[name] = logit
+            logits.append(w * logit)
+            total_weight += w
+
+        if total_weight <= 0.0:
+            raise ValueError('At least one positive fusion weight is required.')
+
+        stacked = torch.stack(logits, dim=0)
+        if method == 'weighted_mean':
+            fused_logit = stacked.sum(dim=0) / total_weight
+        elif method == 'max':
+            fused_logit = stacked.max(dim=0).values
+        elif method == 'product':
+            probs = [torch.sigmoid(component_logits[n]) for n in component_logits]
+            fused_prob = torch.stack(probs, dim=0).prod(dim=0).pow(1.0 / len(probs))
+            fused_logit = torch.logit(fused_prob.clamp(1e-6, 1 - 1e-6))
+        else:
+            raise ValueError(f'Unknown fusion method: {method}')
+
+        return fused_logit, component_logits
+
+    def forward(self, data, meta, fa_path, modality='ta_va', return_mode=None, fusion_weights=None, fusion_method='weighted_mean'):
 
         claploss_tv = torch.tensor(0.0)
         claploss_ta = torch.tensor(0.0)
@@ -175,6 +228,9 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
 
         glm_loss = torch.tensor(0.0)
         denoised_loss = torch.tensor(0.0)
+
+        if return_mode in ('embeddings', 'scores'):
+            modality = 'tva_va'
 
         assert modality in ['t_a', 'a_a', 'ta_a', 'ta_va', 'tva_a', 'tva_va']
 
@@ -517,6 +573,24 @@ class TVA_KWS_PLCL_AVmask(nn.Module):
                 av_max_corss_speech = av_anchor_speech.max(dim = 1).values.unsqueeze(1)
                 pattern_av = self.transformer_av(av_anchor_speech, av_anchor_speech, av_max_corss_speech)
                 embd_a_v = self.gru_a_v(pattern_av)
+
+        pair_embeddings = {
+            't_v': embd_t_v,
+            't_a': embd_t_a,
+            'v_v': embd_v_v,
+            'v_a': embd_v_a,
+            'a_v': embd_a_v,
+            'a_a': embd_a_a,
+        }
+
+        if return_mode == 'embeddings':
+            return pair_embeddings
+
+        if return_mode == 'scores':
+            fused_logit, component_logits = self.fuse_pair_scores(
+                pair_embeddings, weights=fusion_weights, method=fusion_method
+            )
+            return fused_logit, component_logits
 
         if self.training: 
 

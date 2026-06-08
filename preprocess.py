@@ -2,8 +2,11 @@ import os
 import glob
 import numpy as np
 
-base_dir = "/local/scratch/linna/MISP/MISP_data/MISP-QEKS/data/eval_seen"
-output_dir = "/local/scratch/linna/MISP/MISP_data/MISP-QEKS/raw_dicts/eval_seen"
+from paths_config import data_split_dir, raw_dict_dir
+
+split = "eval_seen"
+base_dir = data_split_dir(split)
+output_dir = raw_dict_dir(split)
 os.makedirs(output_dir, exist_ok=True)
 
 # Find all query files to get the unique pair IDs

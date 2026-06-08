@@ -536,7 +536,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--train_csv',    type=str, default='train')
     parser.add_argument('--eval_csv',     type=str, default='eval_inset,eval_outset')
-    parser.add_argument('--datalist_dir', type=str, default='/work2/asrkws/shicheng2/Multimodal_KWS/data_list', help='Path where the scp stored')
+    parser.add_argument('--datalist_dir', type=str, default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/data_list', help='Path where the scp stored')
 
     parser.add_argument('--prob_addNoise',  type=float, default=0.5, help='probability of adding noise')
 

@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import numpy as np
 import random
@@ -9,19 +10,30 @@ from g2p.g2p_en.g2p import G2p
 from lipreading.video_encoder import GrayCropFlip, CNN_Resnet
 from qwen_audio_encoder import QwenAudioEncoder
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import (
+    LIPREADING_CKPT,
+    NOISE_ROOT,
+    PREFIX_CONFIG,
+    features_dir,
+    noisy_wav_dir,
+    npy_dir,
+    raw_scp_path,
+)
+
 seed = 42
 random.seed(seed)
 
-prefix = 'eval' # dev; eval
-scp = f'/local/scratch/linna/MISP/MISP_data/MISP-QEKS/raw_dicts/eval_seen/raw_eval_seen.scp'
-fea_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/features/{prefix}/'
-npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/'
-noisy_wav_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/noisy_wav/{prefix}/'
+prefix = "eval"
+_cfg = PREFIX_CONFIG[prefix]
+scp = raw_scp_path(_cfg["data_split"])
+fea_save_dir = features_dir(prefix) + "/"
+npy_save_dir = npy_dir(prefix) + "/"
+noisy_wav_save_dir = noisy_wav_dir(prefix) + "/"
 
+snr_list = [5, 0, -5, -10]
 
-snr_list = [5, 0, -5, -10] # for dev & eval [3, 6, 9] for train;  
-
-noise_root = '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/noise'
+noise_root = NOISE_ROOT
 noise_list = ['Home',
               'Music',
               'TV',
@@ -48,7 +60,7 @@ g2p = G2p()
 CNN_Resnet = CNN_Resnet(output_dim=256)
 GrayCropFlip = GrayCropFlip(channel_input='rgb')
 GrayCropFlip.to(device)
-checkpoint_pretrain = torch.load('/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/lipreading/lipreading_LRW_0.8018.pt', map_location=device)
+checkpoint_pretrain = torch.load(LIPREADING_CKPT, map_location=device)
 CNN_Resnet.load_state_dict(checkpoint_pretrain)
 CNN_Resnet.to(device)
 

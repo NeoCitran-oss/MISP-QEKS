@@ -15,6 +15,7 @@ import math
 import torch.nn.functional as F
 
 sys.path.append(os.path.dirname(__file__))
+from audio_path_utils import filter_scp_for_clean, resolve_com_audi_fea_path
 
 # Number of input samples (@16 kHz) per audio encoder frame.
 # The Qwen2-Audio audio tower emits one frame every 640 samples (40 ms, 25 fps)
@@ -82,7 +83,9 @@ class LipReading2Dataset(Dataset):
                     lines = f.readlines()
                 self.files_scp_tmp = [line.strip() for line in lines]
                 self.files_scp = self.files_scp + self.files_scp_tmp
-            
+
+        self.files_scp = filter_scp_for_clean(self.files_scp)
+
         self.sample_rate = 16000
         self.maxlen_text = 40
         self.maxlen_vide = 50
@@ -191,16 +194,20 @@ class LipReading2Dataset(Dataset):
         if self.train:
             if self.rng.random(1)[0] <= self.prob_addNoise:
                 snr = self.rng.choice(self.snr_list, replace=False)
-                com_audi_fea_path = feature_data['com_audi_fea_path'].replace('/wav/', f'/wav_{snr}db/')
+                com_audi_fea_path = resolve_com_audi_fea_path(
+                    feature_data['com_audi_fea_path'], snr
+                )
                 com_audi_fea = np.load(com_audi_fea_path).squeeze(0)
             else:
                 com_audi_fea = np.load(feature_data['com_audi_fea_path']).squeeze(0)
         else:
-            if self.snr_list == None:                                                           # clean
+            if self.snr_list is None:
                 com_audi_fea = np.load(feature_data['com_audi_fea_path']).squeeze(0)
-            else:                                                                               # noisy
+            else:
                 snr = self.snr_list[0]
-                com_audi_fea_path = feature_data['com_audi_fea_path'].replace('/wav/', f'/wav_{snr}db/')
+                com_audi_fea_path = resolve_com_audi_fea_path(
+                    feature_data['com_audi_fea_path'], snr
+                )
                 com_audi_fea = np.load(com_audi_fea_path).squeeze(0)
         
         com_audi_fea = torch.tensor(com_audi_fea).cpu().detach()
