@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(_SCRIPT_DIR, ".."))
 from paths_config import (  # noqa: E402
     NOISE_ROOT,
     PREFIX_CONFIG,
+    SIGLIP2_MODEL_ID,
     configure_scratch_storage,
     data_list_dir,
     ensure_scratch_execution,
@@ -35,6 +36,7 @@ from paths_config import (  # noqa: E402
     npy_dir,
     raw_scp_path,
 )
+from siglip2_video_encoder import MATCHER_VIDEO_FEAT_DIM  # noqa: E402
 
 VIDEO_LIP_SUBDIR = "lip_siglip2"
 
@@ -42,7 +44,7 @@ VIDEO_LIP_SUBDIR = "lip_siglip2"
 def parse_args():
     parser = argparse.ArgumentParser(description="TVA feature extraction with SigLIP 2 video encoder")
     parser.add_argument("--prefix", type=str, default="eval", choices=list(PREFIX_CONFIG.keys()))
-    parser.add_argument("--model_id", type=str, default=DEFAULT_MODEL_ID)
+    parser.add_argument("--model_id", type=str, default=SIGLIP2_MODEL_ID)
     parser.add_argument("--batch_size", type=int, default=16, help="SigLIP 2 frame batch size")
     parser.add_argument(
         "--output_dim",
@@ -79,11 +81,7 @@ from tqdm import tqdm
 
 from g2p.g2p_en.g2p import G2p
 from qwen_audio_encoder import QwenAudioEncoder
-from siglip2_video_encoder import (
-    DEFAULT_MODEL_ID,
-    MATCHER_VIDEO_FEAT_DIM,
-    Siglip2VideoEncoder,
-)
+from siglip2_video_encoder import Siglip2VideoEncoder
 
 random.seed(args.seed)
 
