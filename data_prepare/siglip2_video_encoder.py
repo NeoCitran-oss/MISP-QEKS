@@ -43,7 +43,7 @@ def _frames_to_pil_list(frames: torch.Tensor) -> list[Image.Image]:
     return images
 
 
-def _load_siglip2(model_id: str, device: torch.device):
+def _load_siglip2(model_id: str, device: torch.device, cache_dir: str | None = None):
     """Load SigLIP 2 vision model + processor with version fallbacks."""
     try:
         from transformers import AutoModel, AutoProcessor
@@ -53,9 +53,11 @@ def _load_siglip2(model_id: str, device: torch.device):
             'Install with: pip install "transformers>=4.49.0"'
         ) from exc
 
-    processor = AutoProcessor.from_pretrained(model_id)
+    processor = AutoProcessor.from_pretrained(
+        model_id, use_fast=True, cache_dir=cache_dir
+    )
     dtype = torch.float16 if device.type == "cuda" else torch.float32
-    model = AutoModel.from_pretrained(model_id, torch_dtype=dtype)
+    model = AutoModel.from_pretrained(model_id, torch_dtype=dtype, cache_dir=cache_dir)
     if not hasattr(model, "get_image_features"):
         raise RuntimeError(
             f"Loaded model {model_id} does not expose get_image_features(). "
@@ -76,6 +78,7 @@ class Siglip2VideoEncoder:
         output_dim: int | None = MATCHER_VIDEO_FEAT_DIM,
         batch_size: int = 16,
         max_frames: int | None = None,
+        cache_dir: str | None = None,
     ):
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -85,7 +88,9 @@ class Siglip2VideoEncoder:
         self.max_frames = max_frames
         self.output_dim = output_dim
 
-        self.model, self.processor = _load_siglip2(model_id, self.device)
+        self.model, self.processor = _load_siglip2(
+            model_id, self.device, cache_dir=cache_dir
+        )
         hidden = int(self.model.config.vision_config.hidden_size)
 
         self.native_feat_dim = hidden

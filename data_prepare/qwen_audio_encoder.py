@@ -48,7 +48,7 @@ def _build_audio_encoder(audio_config):
     return AutoModel.from_config(audio_config)
 
 
-def _load_audio_tower_lightweight(model_id, dtype):
+def _load_audio_tower_lightweight(model_id, dtype, cache_dir=None):
     """Build the audio encoder and load *only* its weights from the checkpoint.
 
     Downloads/reads just the shards containing ``audio_tower`` weights so the
@@ -57,11 +57,11 @@ def _load_audio_tower_lightweight(model_id, dtype):
     from safetensors.torch import load_file
     from transformers import AutoConfig
 
-    config = AutoConfig.from_pretrained(model_id)
+    config = AutoConfig.from_pretrained(model_id, cache_dir=cache_dir)
     audio_config = getattr(config, "audio_config", config)
     encoder = _build_audio_encoder(audio_config)
 
-    local_files = _resolve_audio_shards(model_id)
+    local_files = _resolve_audio_shards(model_id, cache_dir=cache_dir)
 
     state = {}
     for shard_path in local_files:
@@ -85,7 +85,7 @@ def _load_audio_tower_lightweight(model_id, dtype):
     return encoder
 
 
-def _resolve_audio_shards(model_id):
+def _resolve_audio_shards(model_id, cache_dir=None):
     """Return local paths of the safetensors shards holding audio_tower weights."""
     # Local directory checkpoint.
     if os.path.isdir(model_id):
@@ -101,22 +101,28 @@ def _resolve_audio_shards(model_id):
     from huggingface_hub import hf_hub_download
 
     try:
-        index_path = hf_hub_download(model_id, "model.safetensors.index.json")
+        index_path = hf_hub_download(
+            model_id, "model.safetensors.index.json", cache_dir=cache_dir
+        )
         with open(index_path) as f:
             weight_map = json.load(f)["weight_map"]
         shards = sorted({fname for key, fname in weight_map.items() if _AUDIO_TOWER_KEY in key})
-        return [hf_hub_download(model_id, s) for s in shards]
+        return [
+            hf_hub_download(model_id, s, cache_dir=cache_dir) for s in shards
+        ]
     except Exception:
         # Single-file checkpoint (not sharded): download the whole safetensors.
-        return [hf_hub_download(model_id, "model.safetensors")]
+        return [hf_hub_download(model_id, "model.safetensors", cache_dir=cache_dir)]
 
 
-def _load_audio_tower_full(model_id, dtype):
+def _load_audio_tower_full(model_id, dtype, cache_dir=None):
     """Fallback: load the full model and keep only the audio tower."""
     from transformers import Qwen2AudioForConditionalGeneration
 
     full_model = Qwen2AudioForConditionalGeneration.from_pretrained(
-        model_id, torch_dtype=dtype if dtype is not None else torch.float32
+        model_id,
+        torch_dtype=dtype if dtype is not None else torch.float32,
+        cache_dir=cache_dir,
     )
 
     # transformers >= 5 nests submodules under ``.model``; older versions are flat.
@@ -143,29 +149,32 @@ class QwenAudioEncoder:
     """
 
     def __init__(self, model_id=DEFAULT_MODEL_ID, device=None, max_frames=100,
-                 dtype=None, lightweight=True):
+                 dtype=None, lightweight=True, cache_dir=None):
         from transformers import AutoProcessor
 
         self.device = torch.device(device) if device is not None else torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.max_frames = max_frames
+        self.cache_dir = cache_dir
 
         audio_tower = None
         if lightweight:
             try:
-                audio_tower = _load_audio_tower_lightweight(model_id, dtype)
+                audio_tower = _load_audio_tower_lightweight(
+                    model_id, dtype, cache_dir=cache_dir
+                )
             except Exception as exc:  # pragma: no cover - fall back to full load
                 print(f"[QwenAudioEncoder] lightweight load failed ({exc}); "
                       f"falling back to full-model load.")
         if audio_tower is None:
-            audio_tower = _load_audio_tower_full(model_id, dtype)
+            audio_tower = _load_audio_tower_full(model_id, dtype, cache_dir=cache_dir)
 
         self.audio_tower = audio_tower.to(self.device).eval()
         for param in self.audio_tower.parameters():
             param.requires_grad = False
 
-        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.processor = AutoProcessor.from_pretrained(model_id, cache_dir=cache_dir)
         self.feature_extractor = self.processor.feature_extractor
 
     @torch.no_grad()

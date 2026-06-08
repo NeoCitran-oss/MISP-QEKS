@@ -4,7 +4,9 @@ Feature extraction with Google SigLIP 2 video encoder + Qwen2-Audio + G2P.
 Same pipeline as feature_extractor_TVA2.py, but lip/video features are stored
 under features/<prefix>/lip_siglip2/ (does not overwrite CNN lip features).
 
-Usage (from repo root):
+Run on tars only (not your laptop) — caches and outputs go to /local/scratch.
+
+Usage (on tars):
   cd data_prepare
   python feature_extractor_TVA2_siglip2.py --prefix eval
 
@@ -12,30 +14,23 @@ Requires:
   pip install "transformers>=4.49.0" pillow
 """
 import argparse
+import glob
 import os
 import random
+import re
 import sys
 import wave
 
-import numpy as np
-import torch
-import torchvision
-from tqdm import tqdm
-
-from g2p.g2p_en.g2p import G2p
-from qwen_audio_encoder import QwenAudioEncoder
-from siglip2_video_encoder import (
-    DEFAULT_MODEL_ID,
-    MATCHER_VIDEO_FEAT_DIM,
-    Siglip2VideoEncoder,
-)
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_SCRIPT_DIR, ".."))
 from paths_config import (  # noqa: E402
     NOISE_ROOT,
     PREFIX_CONFIG,
+    configure_scratch_storage,
     data_list_dir,
+    ensure_scratch_execution,
     features_dir,
+    hf_cache_root,
     noisy_wav_dir,
     npy_dir,
     raw_scp_path,
@@ -61,12 +56,35 @@ def parse_args():
         help="Save native SigLIP 2 dim (no linear projection); requires retraining Vide_Proj",
     )
     parser.add_argument("--max_samples", type=int, default=0, help="Limit samples (0 = all)")
+    parser.add_argument("--start_index", type=int, default=0, help="Resume: skip first N lines in raw scp")
     parser.add_argument("--max_frames", type=int, default=50, help="Max video frames per clip")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--allow-local",
+        action="store_true",
+        help="Allow running off tars (downloads HF models to local disk — not recommended)",
+    )
     return parser.parse_args()
 
 
 args = parse_args()
+ensure_scratch_execution(allow_local=args.allow_local)
+cache_root = configure_scratch_storage()
+print(f"HF/NLTK cache -> {cache_root}")
+
+import numpy as np
+import torch
+import torchvision
+from tqdm import tqdm
+
+from g2p.g2p_en.g2p import G2p
+from qwen_audio_encoder import QwenAudioEncoder
+from siglip2_video_encoder import (
+    DEFAULT_MODEL_ID,
+    MATCHER_VIDEO_FEAT_DIM,
+    Siglip2VideoEncoder,
+)
+
 random.seed(args.seed)
 
 cfg = PREFIX_CONFIG[args.prefix]
@@ -87,7 +105,13 @@ print("Using:", device)
 print("SigLIP 2 model:", args.model_id)
 print("Video features ->", VIDEO_LIP_SUBDIR)
 
-qwen_enc = QwenAudioEncoder(model_id="Qwen/Qwen2-Audio-7B", device=device, max_frames=100)
+_hf_cache = hf_cache_root()
+qwen_enc = QwenAudioEncoder(
+    model_id="Qwen/Qwen2-Audio-7B",
+    device=device,
+    max_frames=100,
+    cache_dir=_hf_cache,
+)
 g2p = G2p()
 video_enc = Siglip2VideoEncoder(
     model_id=args.model_id,
@@ -95,6 +119,7 @@ video_enc = Siglip2VideoEncoder(
     output_dim=None if args.native_dim else args.output_dim,
     batch_size=args.batch_size,
     max_frames=args.max_frames,
+    cache_dir=_hf_cache,
 )
 print(f"SigLIP 2 output dim: {video_enc.feat_dim} (native={video_enc.native_feat_dim})")
 
@@ -198,6 +223,28 @@ def write_shuf_scp(lines, scp_name):
         print(f"Wrote {shuf_path} ({len(lines)} lines)")
 
 
+def rebuild_shuf_scp_from_disk(scp_name):
+    """Rebuild shuf list from all clean npy dicts (safe after resume)."""
+    pattern = re.compile(r"_-?\d+db\.npy$")
+    clean_npys = sorted(
+        p for p in glob.glob(os.path.join(npy_save_dir, "*.npy")) if not pattern.search(p)
+    )
+    lines = [p + "\n" for p in clean_npys]
+    write_shuf_scp(lines, scp_name)
+    return len(lines)
+
+
+def sample_is_complete(anc_base, com_base):
+    clean_path = os.path.join(npy_save_dir, f"{anc_base}+{com_base}.npy")
+    if not os.path.exists(clean_path):
+        return False
+    for snr in snr_list:
+        snr_path = os.path.join(npy_save_dir, f"{anc_base}+{com_base}_{snr}db.npy")
+        if not os.path.exists(snr_path):
+            return False
+    return True
+
+
 def read_video_frames(path: str) -> torch.Tensor:
     frames, _, _ = torchvision.io.read_video(path, pts_unit="sec")
     return frames
@@ -205,18 +252,27 @@ def read_video_frames(path: str) -> torch.Tensor:
 
 with open(scp_file) as f:
     lines = f.readlines()
+if args.start_index > 0:
+    lines = lines[args.start_index :]
+    print(f"Resuming from index {args.start_index} ({len(lines)} samples remaining)")
 if args.max_samples > 0:
     lines = lines[: args.max_samples]
     print(f"Limited to {len(lines)} samples")
 
-shuf_scp_lines = []
 seed = args.seed
+skipped_complete = 0
 
 for line in tqdm(lines, desc=f"siglip2/{args.prefix}"):
     line = line.strip()
     sample = np.load(line, allow_pickle=True).item()
 
     com_wav_path, anc_wav_path = sample["com_wav_path"], sample["anc_wav_path"]
+    anc_base = os.path.basename(anc_wav_path).replace(".wav", "")
+    com_base = os.path.basename(com_wav_path).replace(".wav", "")
+    if sample_is_complete(anc_base, com_base):
+        skipped_complete += 1
+        continue
+
     anc_lip_path, com_lip_path = sample["anc_lip_path"], sample["com_lip_path"]
     anc_text, com_text = sample["anc_text"], sample["com_text"]
 
@@ -258,8 +314,6 @@ for line in tqdm(lines, desc=f"siglip2/{args.prefix}"):
         os.makedirs(os.path.dirname(anc_clean_fea), exist_ok=True)
         np.save(anc_clean_fea, AudioEncoder(clean_anc_wav / 32768.0))
 
-    anc_base = os.path.basename(anc_wav_path).replace(".wav", "")
-    com_base = os.path.basename(com_wav_path).replace(".wav", "")
     clean_save_path = os.path.join(npy_save_dir, f"{anc_base}+{com_base}.npy")
     if not os.path.exists(clean_save_path):
         clean_dict = build_data_dict(
@@ -281,7 +335,6 @@ for line in tqdm(lines, desc=f"siglip2/{args.prefix}"):
         )
         os.makedirs(os.path.dirname(clean_save_path), exist_ok=True)
         np.save(clean_save_path, clean_dict)
-        shuf_scp_lines.append(clean_save_path + "\n")
 
     for snr in snr_list:
         seed += 1
@@ -320,25 +373,26 @@ for line in tqdm(lines, desc=f"siglip2/{args.prefix}"):
 
         dict_name = f"{anc_base}+{com_base}_{snr}db.npy"
         save_path = os.path.join(npy_save_dir, dict_name)
-        data_dict = build_data_dict(
-            sample,
-            anc_phn_list,
-            com_phn_list,
-            anc_text_fea,
-            com_text_fea,
-            anc_vide_fea_path,
-            com_vide_fea_path,
-            anc_clean_fea,
-            com_clean_fea,
-            anc_text,
-            com_text,
-            anc_lip_path,
-            com_lip_path,
-            anc_wav_path,
-            com_wav_path,
-        )
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        np.save(save_path, data_dict)
+        if not os.path.exists(save_path):
+            data_dict = build_data_dict(
+                sample,
+                anc_phn_list,
+                com_phn_list,
+                anc_text_fea,
+                com_text_fea,
+                anc_vide_fea_path,
+                com_vide_fea_path,
+                anc_clean_fea,
+                com_clean_fea,
+                anc_text,
+                com_text,
+                anc_lip_path,
+                com_lip_path,
+                anc_wav_path,
+                com_wav_path,
+            )
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            np.save(save_path, data_dict)
 
-write_shuf_scp(shuf_scp_lines, scp_out_name)
-print("Done.")
+n_clean = rebuild_shuf_scp_from_disk(scp_out_name)
+print(f"Done. Skipped {skipped_complete} already-complete samples. shuf has {n_clean} entries.")

@@ -1,5 +1,6 @@
 """Shared paths for MISP-QEKS on linna@tars (override via env vars)."""
 import os
+import sys
 
 MISP_DATA = os.environ.get(
     "MISP_DATA_ROOT",
@@ -71,3 +72,53 @@ def noisy_wav_dir(prefix: str) -> str:
 
 def data_list_dir() -> str:
     return os.path.join(MISP_BASELINE, "data_list")
+
+
+def hf_cache_root() -> str:
+    """Hugging Face / transformers download cache (keep off laptop home dir)."""
+    return os.environ.get("HF_CACHE_ROOT", os.path.join(MISP_BASELINE, "hf_cache"))
+
+
+def configure_scratch_storage() -> str:
+    """
+    Redirect model caches away from ~/.cache and ~/nltk_data to scratch.
+
+    Call this before importing transformers or loading Qwen / SigLIP 2.
+    """
+    root = hf_cache_root()
+    hub = os.path.join(root, "hub")
+    transformers_cache = os.path.join(root, "transformers")
+    torch_home = os.path.join(root, "torch")
+    nltk_data = os.path.join(root, "nltk_data")
+
+    for path in (root, hub, transformers_cache, torch_home, nltk_data):
+        os.makedirs(path, exist_ok=True)
+
+    os.environ["HF_HOME"] = root
+    os.environ["HUGGINGFACE_HUB_CACHE"] = hub
+    os.environ["TRANSFORMERS_CACHE"] = transformers_cache
+    os.environ["TORCH_HOME"] = torch_home
+    os.environ["NLTK_DATA"] = nltk_data
+    return root
+
+
+def is_tars_scratch_layout() -> bool:
+    return MISP_BASELINE.startswith("/local/scratch") and MISP_DATA.startswith(
+        "/local/scratch"
+    )
+
+
+def ensure_scratch_execution(allow_local: bool = False) -> None:
+    """Refuse to run on a laptop/home layout unless explicitly overridden."""
+    if allow_local:
+        return
+    if not is_tars_scratch_layout():
+        print(
+            "ERROR: This job must run on tars scratch, not your local computer.\n"
+            f"  MISP_BASELINE = {MISP_BASELINE}\n"
+            f"  MISP_DATA     = {MISP_DATA}\n"
+            "SSH to linna@tars.cl.uzh.ch and run there, or pass --allow-local "
+            "(not recommended — fills your home disk with HF model caches).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
