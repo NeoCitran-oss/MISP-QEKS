@@ -107,7 +107,11 @@ noise_dir_map = {"Home": "GenHome", "Music": "GenMusic"}
 choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using: {device} | audio_batch={args.audio_batch_size} video_batch={args.video_batch_size} prefetch={args.video_workers}")
+_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+print(
+    f"Using: {device} (CUDA_VISIBLE_DEVICES={_visible}) | "
+    f"audio_batch={args.audio_batch_size} video_batch={args.video_batch_size} prefetch={args.video_workers}"
+)
 
 _hf_cache = hf_cache_root()
 qwen_enc = BatchedQwenAudioEncoder(
