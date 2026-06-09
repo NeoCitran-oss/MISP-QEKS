@@ -50,7 +50,7 @@ def parse_args():
     p.add_argument("--prefix", type=str, default="eval", choices=list(PREFIX_CONFIG.keys()))
     p.add_argument("--model_id", type=str, default=SIGLIP2_MODEL_ID)
     p.add_argument("--video_batch_size", type=int, default=32, help="SigLIP2 frames per GPU batch")
-    p.add_argument("--audio_batch_size", type=int, default=4, help="Qwen waveforms per GPU batch")
+    p.add_argument("--audio_batch_size", type=int, default=8, help="Qwen waveforms per GPU batch")
     p.add_argument("--video_workers", type=int, default=1, help="CPU threads for video prefetch (1 per GPU process; avoid 4×N GPUs)")
     p.add_argument(
         "--no_video_prefetch",
@@ -72,7 +72,55 @@ def parse_args():
     p.add_argument("--log_file", type=str, default=None)
     p.add_argument("--no_log_file", action="store_true")
     p.add_argument("--no_rebuild_scp", action="store_true")
+    p.add_argument(
+        "--require_cuda",
+        action="store_true",
+        help="Exit if CUDA is unavailable (avoid silent CPU fallback at ~70s/pair)",
+    )
     return p.parse_args()
+
+
+def resolve_device(require_cuda: bool, retries: int = 5, delay_sec: int = 10):
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+    last_err = None
+    for attempt in range(1, retries + 1):
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.set_device(0)
+                torch.zeros(1, device="cuda")
+                return torch.device("cuda")
+            except Exception as exc:
+                last_err = exc
+                print(
+                    f"CUDA probe attempt {attempt}/{retries} failed: {exc}",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                f"CUDA not available attempt {attempt}/{retries} "
+                f"(CUDA_VISIBLE_DEVICES={visible})",
+                file=sys.stderr,
+            )
+        if attempt < retries:
+            import time
+
+            time.sleep(delay_sec)
+    msg = (
+        f"CUDA unavailable after {retries} attempts "
+        f"(CUDA_VISIBLE_DEVICES={visible})."
+    )
+    if last_err is not None:
+        msg += f" Last error: {last_err}"
+    if require_cuda:
+        print(f"ERROR: {msg}", file=sys.stderr)
+        print(
+            "Kill stale jobs (pkill -f feature_extractor_TVA2_siglip2), "
+            "wait ~10s, restart this shard.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"WARNING: {msg} — falling back to CPU (very slow).", file=sys.stderr)
+    return torch.device("cpu")
 
 
 args = parse_args()
@@ -115,11 +163,12 @@ noise_list = ["Home", "Music", "TV", "Store", "WindAirCon", "WindFan", "babble_n
 noise_dir_map = {"Home": "GenHome", "Music": "GenMusic"}
 choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = resolve_device(require_cuda=args.require_cuda)
 _visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
 print(
     f"Using: {device} (CUDA_VISIBLE_DEVICES={_visible}) | "
-    f"audio_batch={args.audio_batch_size} video_batch={args.video_batch_size} prefetch={args.video_workers}"
+    f"audio_batch={args.audio_batch_size} video_batch={args.video_batch_size} "
+    f"prefetch={0 if args.no_video_prefetch else args.video_workers}"
 )
 
 _hf_cache = hf_cache_root()

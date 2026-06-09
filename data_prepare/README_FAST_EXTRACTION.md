@@ -249,8 +249,16 @@ Pass `--allow-local` or set `MISP_BASELINE_ROOT` / `MISP_DATA_ROOT` to scratch p
 **`decord` import fails**  
 Install: `pip install decord` — code falls back to torchvision (slower).
 
-**CUDA OOM**  
-Lower `--audio_batch_size` and/or `--video_batch_size`.
+**CUDA unknown error / `Using: cpu` at ~70 s/pair**  
+Usually stale GPU processes after `pkill` or launching all 6 shards at once. Fix:
+
+```bash
+pkill -f feature_extractor_TVA2_siglip2 || true
+sleep 10
+bash scripts/run_siglip2_extract_full_train_fast.sh
+```
+
+The launcher staggers GPU starts by 20 s and passes `--require_cuda` so a bad shard exits instead of running on CPU. Check each log for `Using: cuda`.
 
 **`mel input features to be of length 3000, but found 97`**  
 Batched audio was padded only to the longest clip in the mini-batch. Fixed in `qwen_audio_encoder_batched.py` (pads every mel to 3000). `git pull` and restart extraction.

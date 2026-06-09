@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Fast parallel SigLIP2 extraction (batched Qwen + decord/prefetch video).
 #
-#   GPUS="0,4,5,6" MAX_SAMPLES=50000 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
-#   MAX_SAMPLES=0 bash scripts/run_siglip2_extract_multi_gpu_fast.sh   # full split
+#   bash scripts/run_siglip2_extract_full_train_fast.sh   # 500k train, GPUs 0-5
+#   GPUS="0,1,2,3,4,5" MAX_SAMPLES=0 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
+#   GPUS="0,1,4,5" MAX_SAMPLES=50000 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
 #
-# After ALL shards finish:
-#   python scripts/build_partial_train_scp.py --max_pairs 50000
-#   bash run_train_siglip2_quick.sh
+# After ALL shards finish (full train):
+#   python scripts/rebuild_shuf_scp.py --prefix train
+#   bash run_train.sh
 
 set -euo pipefail
 
@@ -17,22 +18,28 @@ cd "${ROOT}"
 source "${ROOT}/scripts/activate_env.sh"
 
 PREFIX="${PREFIX:-train}"
-GPUS="${GPUS:-0,1,4,5}"
-MAX_SAMPLES="${MAX_SAMPLES:-50000}"
-AUDIO_BATCH="${AUDIO_BATCH:-4}"
+GPUS="${GPUS:-0,1,2,3,4,5}"
+MAX_SAMPLES="${MAX_SAMPLES:-0}"
+AUDIO_BATCH="${AUDIO_BATCH:-8}"
 VIDEO_BATCH="${VIDEO_BATCH:-32}"
-VIDEO_WORKERS="${VIDEO_WORKERS:-1}"
-NO_VIDEO_PREFETCH="${NO_VIDEO_PREFETCH:-0}"KILL_OLD="${KILL_OLD:-1}"
-
+VIDEO_WORKERS="${VIDEO_WORKERS:-2}"
+NO_VIDEO_PREFETCH="${NO_VIDEO_PREFETCH:-0}"
+LAUNCH_DELAY="${LAUNCH_DELAY:-20}"
+KILL_OLD="${KILL_OLD:-1}"
+REQUIRE_CUDA="${REQUIRE_CUDA:-1}"
 mkdir -p results
 
 if [[ "${KILL_OLD}" == "1" ]]; then
   if pgrep -f "feature_extractor_TVA2_siglip2" >/dev/null 2>&1; then
     echo "Stopping existing SigLIP2 extraction jobs ..."
     pkill -f "feature_extractor_TVA2_siglip2" || true
-    sleep 2
+    echo "Waiting for GPU processes to exit ..."
+    sleep 10
   fi
 fi
+
+export CUDA_MODULE_LOADING="${CUDA_MODULE_LOADING:-LAZY}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 SPLIT="$(python -c "from paths_config import PREFIX_CONFIG; print(PREFIX_CONFIG['${PREFIX}']['data_split'])")"
 SCP="$(python -c "from paths_config import raw_scp_path, PREFIX_CONFIG; print(raw_scp_path(PREFIX_CONFIG['${PREFIX}']['data_split']))")"
@@ -55,13 +62,18 @@ CHUNK=$(( (WORK_TOTAL + NUM_GPUS - 1) / NUM_GPUS ))
 
 echo "=== Fast SigLIP2 multi-GPU extraction ==="
 echo "prefix=${PREFIX}  scp_lines=${SCP_TOTAL}  extract_total=${WORK_TOTAL}"
-echo "gpus=${GPUS}  chunk≈${CHUNK}"
+echo "gpus=${GPUS}  chunk≈${CHUNK}  launch_delay=${LAUNCH_DELAY}s"
 echo "audio_batch=${AUDIO_BATCH}  video_batch=${VIDEO_BATCH}  video_workers=${VIDEO_WORKERS}  no_prefetch=${NO_VIDEO_PREFETCH}"
+echo "Tip: logs must show 'Using: cuda' — if 'cpu', kill and re-run after GPUs are idle."
 cd data_prepare
 PIDS=()
 
 for idx in "${!GPU_ARR[@]}"; do
   GPU="${GPU_ARR[$idx]}"
+  if [[ "${idx}" -gt 0 && "${LAUNCH_DELAY}" -gt 0 ]]; then
+    echo "Stagger launch: sleeping ${LAUNCH_DELAY}s before GPU ${GPU} ..."
+    sleep "${LAUNCH_DELAY}"
+  fi
   START=$(( idx * CHUNK ))
   if [[ "${START}" -ge "${WORK_TOTAL}" ]]; then
     echo "Skip GPU ${GPU}: start_index ${START} >= ${WORK_TOTAL}"
@@ -78,6 +90,7 @@ for idx in "${!GPU_ARR[@]}"; do
 
   EXTRA=()
   [[ "${NO_VIDEO_PREFETCH}" == "1" ]] && EXTRA+=(--no_video_prefetch)
+  [[ "${REQUIRE_CUDA}" == "1" ]] && EXTRA+=(--require_cuda)
 
   echo "GPU ${GPU}: start_index=${START} max_samples=${COUNT} log=${LOG}"
   CUDA_VISIBLE_DEVICES="${GPU}" nohup python feature_extractor_TVA2_siglip2_fast.py \
@@ -104,6 +117,12 @@ for idx in "${!GPU_ARR[@]}"; do
   echo "  tail -f ${ROOT}/results/siglip2_${PREFIX}_fast_gpu${GPU}.log"
 done
 echo ""
-echo "When all are done:"
-echo "  python scripts/build_partial_train_scp.py --max_pairs ${WORK_TOTAL}"
-echo "  bash run_train_siglip2_quick.sh"
+if [[ "${WORK_TOTAL}" -ge "${SCP_TOTAL}" ]]; then
+  echo "When all are done:"
+  echo "  python scripts/rebuild_shuf_scp.py --prefix train"
+  echo "  bash run_train.sh"
+else
+  echo "When all are done:"
+  echo "  python scripts/build_partial_train_scp.py --max_pairs ${WORK_TOTAL}"
+  echo "  bash run_train_siglip2_quick.sh"
+fi
