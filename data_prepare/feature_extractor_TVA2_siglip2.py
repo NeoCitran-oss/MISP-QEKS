@@ -81,6 +81,11 @@ def parse_args():
         action="store_true",
         help="Do not write a log file (console only)",
     )
+    parser.add_argument(
+        "--no_rebuild_scp",
+        action="store_true",
+        help="Skip shuf_*.scp rebuild at end (use for multi-GPU shards; merge when all done)",
+    )
     return parser.parse_args()
 
 
@@ -131,7 +136,8 @@ noise_dir_map = {"Home": "GenHome", "Music": "GenMusic"}
 choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using:", device)
+_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+print(f"Using: {device} (CUDA_VISIBLE_DEVICES={_visible})")
 print("SigLIP 2 model:", args.model_id)
 print("Video features ->", VIDEO_LIP_SUBDIR)
 
@@ -424,5 +430,11 @@ for line in tqdm(lines, desc=f"siglip2/{args.prefix}"):
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             np.save(save_path, data_dict)
 
-n_clean = rebuild_shuf_scp_from_disk(scp_out_name)
-print(f"Done. Skipped {skipped_complete} already-complete samples. shuf has {n_clean} entries.")
+if args.no_rebuild_scp:
+    print(
+        f"Shard done. Skipped {skipped_complete} already-complete samples. "
+        "shuf rebuild skipped (--no_rebuild_scp)."
+    )
+else:
+    n_clean = rebuild_shuf_scp_from_disk(scp_out_name)
+    print(f"Done. Skipped {skipped_complete} already-complete samples. shuf has {n_clean} entries.")
