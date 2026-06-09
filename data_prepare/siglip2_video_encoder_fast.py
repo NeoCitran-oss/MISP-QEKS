@@ -109,5 +109,20 @@ class VideoPrefetcher:
             raise KeyError(key)
         return self._futures.pop(key).result()
 
+    def discard(self, key: str) -> None:
+        """Drop a scheduled decode (e.g. feature already on disk). Frees thread + RAM."""
+        fut = self._futures.pop(key, None)
+        if fut is None:
+            return
+        if fut.done():
+            try:
+                fut.result()
+            except Exception:
+                pass
+        else:
+            fut.cancel()
+
     def shutdown(self, wait: bool = True) -> None:
+        for key in list(self._futures):
+            self.discard(key)
         self._pool.shutdown(wait=wait)

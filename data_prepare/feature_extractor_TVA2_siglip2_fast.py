@@ -224,6 +224,7 @@ def sample_complete(anc_base, com_base):
 
 def encode_and_save_video(fea_path, cache_key, lip_path):
     if os.path.exists(fea_path):
+        prefetcher.discard(cache_key)
         return
     frames = prefetcher.get(cache_key)
     os.makedirs(os.path.dirname(fea_path), exist_ok=True)
@@ -264,20 +265,25 @@ for i in range(min(args.video_workers + 1, len(lines))):
     _schedule_pair(i)
 
 skipped = 0
+n_gpu_audio = 0
+n_gpu_video = 0
 seed = args.seed
 
 try:
     for i, line in enumerate(tqdm(lines, desc=f"siglip2-fast/{args.prefix}")):
-        _schedule_pair(i + args.video_workers + 1)
-
         sample = np.load(line, allow_pickle=True).item()
         anc_wav_p, com_wav_p = sample["anc_wav_path"], sample["com_wav_path"]
         anc_base = os.path.basename(anc_wav_p).replace(".wav", "")
         com_base = os.path.basename(com_wav_p).replace(".wav", "")
 
         if sample_complete(anc_base, com_base):
+            prefetcher.discard(f"{i}:anc")
+            prefetcher.discard(f"{i}:com")
             skipped += 1
+            _schedule_pair(i + args.video_workers + 1)
             continue
+
+        _schedule_pair(i + args.video_workers + 1)
 
         anc_lip, com_lip = sample["anc_lip_path"], sample["com_lip_path"]
         anc_text, com_text = sample["anc_text"], sample["com_text"]
@@ -288,6 +294,10 @@ try:
         anc_vid = os.path.join(vid_dir, anc_lip.lstrip("/").replace(".mp4", ".npy").replace(".m4p", ".npy"))
         com_vid = os.path.join(vid_dir, com_lip.lstrip("/").replace(".mp4", ".npy").replace(".m4p", ".npy"))
 
+        if not os.path.exists(anc_vid):
+            n_gpu_video += 1
+        if not os.path.exists(com_vid):
+            n_gpu_video += 1
         encode_and_save_video(anc_vid, f"{i}:anc", anc_lip)
         encode_and_save_video(com_vid, f"{i}:com", com_lip)
 
@@ -326,6 +336,8 @@ try:
                 audio_jobs.append((anc_fea, noisy_anc))
                 wav_out[anc_fea] = (noisy_anc, os.path.join(wav_dir, os.path.basename(anc_wav_p)))
 
+        if audio_jobs:
+            n_gpu_audio += 1
         flush_audio_jobs(audio_jobs, wav_out)
 
         clean_npy = os.path.join(npy_save_dir, f"{anc_base}+{com_base}.npy")
@@ -356,7 +368,13 @@ finally:
     prefetcher.shutdown()
 
 if args.no_rebuild_scp:
-    print(f"Shard done. Skipped {skipped} complete samples.")
+    print(
+        f"Shard done. Skipped {skipped} complete samples. "
+        f"Batches with GPU audio={n_gpu_audio} video_encodes={n_gpu_video}."
+    )
 else:
     n = rebuild_shuf_scp(scp_out_name)
-    print(f"Done. Skipped {skipped}. shuf has {n} entries.")
+    print(
+        f"Done. Skipped {skipped}. shuf has {n} entries. "
+        f"GPU audio batches={n_gpu_audio} video_encodes={n_gpu_video}."
+    )
