@@ -4,11 +4,12 @@
 #   # Stop any single-GPU job first:
 #   pkill -f "feature_extractor_TVA2_siglip2.py --prefix train" || true
 #
-#   bash scripts/run_siglip2_extract_multi_gpu.sh
-#   GPUS="0,4,5,6" bash scripts/run_siglip2_extract_multi_gpu.sh
+#   GPUS="0,4,5,6" MAX_SAMPLES=50000 bash scripts/run_siglip2_extract_multi_gpu.sh
+#   MAX_SAMPLES=0 bash scripts/run_siglip2_extract_multi_gpu.sh   # full split (500k train)
 #
 # After ALL shards finish:
-#   python scripts/rebuild_shuf_scp.py --prefix train
+#   python scripts/build_partial_train_scp.py --max_pairs 50000
+#   bash run_train_siglip2_quick.sh
 
 set -euo pipefail
 
@@ -16,6 +17,7 @@ BASE="/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS"
 PREFIX="${PREFIX:-train}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 GPUS="${GPUS:-0,4,5,6}"
+MAX_SAMPLES="${MAX_SAMPLES:-50000}"
 CONDA_ENV="${CONDA_ENV:-mymisp}"
 KILL_OLD="${KILL_OLD:-1}"
 
@@ -44,13 +46,19 @@ if [[ ! -f "${SCP}" ]]; then
   python preprocess_all.py --splits "${SPLIT}"
 fi
 
-TOTAL="$(wc -l < "${SCP}")"
+SCP_TOTAL="$(wc -l < "${SCP}")"
+if [[ "${MAX_SAMPLES}" -gt 0 && "${MAX_SAMPLES}" -lt "${SCP_TOTAL}" ]]; then
+  WORK_TOTAL="${MAX_SAMPLES}"
+else
+  WORK_TOTAL="${SCP_TOTAL}"
+fi
+
 IFS=',' read -r -a GPU_ARR <<< "${GPUS}"
 NUM_GPUS="${#GPU_ARR[@]}"
-CHUNK=$(( (TOTAL + NUM_GPUS - 1) / NUM_GPUS ))
+CHUNK=$(( (WORK_TOTAL + NUM_GPUS - 1) / NUM_GPUS ))
 
 echo "=== SigLIP2 multi-GPU extraction ==="
-echo "prefix=${PREFIX}  total=${TOTAL}  gpus=${GPUS}  chunk≈${CHUNK}"
+echo "prefix=${PREFIX}  scp_lines=${SCP_TOTAL}  extract_total=${WORK_TOTAL}  gpus=${GPUS}  chunk≈${CHUNK}"
 
 cd data_prepare
 PIDS=()
@@ -58,12 +66,12 @@ PIDS=()
 for idx in "${!GPU_ARR[@]}"; do
   GPU="${GPU_ARR[$idx]}"
   START=$(( idx * CHUNK ))
-  if [[ "${START}" -ge "${TOTAL}" ]]; then
-    echo "Skip GPU ${GPU}: start_index ${START} >= ${TOTAL}"
+  if [[ "${START}" -ge "${WORK_TOTAL}" ]]; then
+    echo "Skip GPU ${GPU}: start_index ${START} >= ${WORK_TOTAL}"
     continue
   fi
   if [[ "${idx}" -eq $((NUM_GPUS - 1)) ]]; then
-    COUNT=$(( TOTAL - START ))
+    COUNT=$(( WORK_TOTAL - START ))
   else
     COUNT="${CHUNK}"
   fi
@@ -94,5 +102,6 @@ for idx in "${!GPU_ARR[@]}"; do
   echo "  tail -f ${BASE}/results/siglip2_${PREFIX}_gpu${GPU}.log"
 done
 echo ""
-echo "When all are done, merge scp:"
-echo "  python scripts/rebuild_shuf_scp.py --prefix ${PREFIX}"
+echo "When all are done:"
+echo "  python scripts/build_partial_train_scp.py --max_pairs ${WORK_TOTAL}"
+echo "  bash run_train_siglip2_quick.sh"
