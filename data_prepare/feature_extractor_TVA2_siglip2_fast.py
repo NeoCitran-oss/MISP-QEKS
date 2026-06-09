@@ -21,6 +21,7 @@ import random
 import re
 import sys
 import wave
+from datetime import datetime, timezone
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_SCRIPT_DIR, ".."))
@@ -80,7 +81,7 @@ def parse_args():
     return p.parse_args()
 
 
-def resolve_device(require_cuda: bool, retries: int = 5, delay_sec: int = 10):
+def resolve_device(require_cuda: bool, retries: int = 8, delay_sec: int = 15):
     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
     last_err = None
     for attempt in range(1, retries + 1):
@@ -128,6 +129,9 @@ if not args.no_log_file:
     log_path = args.log_file or siglip2_log_path(f"{args.prefix}_fast")
     setup_run_log(log_path)
     print(f"Log file -> {log_path}")
+
+_run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+print(f"=== run started {_run_ts} | start_index={args.start_index} max_samples={args.max_samples} ===")
 
 ensure_scratch_execution(allow_local=args.allow_local)
 cache_root = configure_scratch_storage()

@@ -98,39 +98,33 @@ On the lab machine (`tars`), defaults in `paths_config.py` point to `/local/scra
 
 ## How to run
 
-### Recommended on tars — 50k train, 4 GPUs (fast)
+### Recommended on tars — full train, single GPU (most reliable)
 
-Stop any slow baseline jobs first, then:
+If multi-GPU hits `CUDA unknown error`, use one GPU:
 
 ```bash
 cd /local/scratch/linna/MISP/MISP_baseline/MISP-QEKS
 source scripts/activate_env.sh
 
-GPUS="0,4,5,6" MAX_SAMPLES=50000 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
+bash scripts/run_siglip2_extract_full_train_single_gpu_fast.sh
+# or: GPU=0 NOHUP=1 bash scripts/run_siglip2_extract_fast.sh   PREFIX=train MAX_SAMPLES=0
 ```
 
-Shards (~12.5k pairs each):
+Monitor: `tail -f results/siglip2_train_fast_gpu0.log`  
+Resume: re-run the same command (skips finished pairs).
 
-| GPU | Log |
-|-----|-----|
-| 0 | `results/siglip2_train_fast_gpu0.log` |
-| 4 | `results/siglip2_train_fast_gpu4.log` |
-| 5 | `results/siglip2_train_fast_gpu5.log` |
-| 6 | `results/siglip2_train_fast_gpu6.log` |
-
-Monitor: `tail -f results/siglip2_train_fast_gpu0.log`
-
-When **all four** logs show `Shard done`, train and test:
+When done:
 
 ```bash
-python scripts/build_partial_train_scp.py --max_pairs 50000
-bash run_train_siglip2_quick.sh
-# EER -> test_siglip2_quick/test.log
+python scripts/rebuild_shuf_scp.py --prefix train
+bash run_train.sh
 ```
 
-Full 500k later: `MAX_SAMPLES=0 GPUS="0,4,5,6" bash scripts/run_siglip2_extract_multi_gpu_fast.sh`
+### Multi-GPU fast (optional, if probe_gpus.sh passes for all GPUs)
 
----
+```bash
+GPUS="0,1,2,3,4,5" MAX_SAMPLES=0 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
+```
 
 ### Quick smoke test (10 samples)
 
@@ -249,16 +243,23 @@ Pass `--allow-local` or set `MISP_BASELINE_ROOT` / `MISP_DATA_ROOT` to scratch p
 **`decord` import fails**  
 Install: `pip install decord` — code falls back to torchvision (slower).
 
-**CUDA unknown error / `Using: cpu` at ~70 s/pair**  
-Usually stale GPU processes after `pkill` or launching all 6 shards at once. Fix:
+**CUDA unknown error / `ERROR: CUDA unavailable`**  
+Usually (1) the next GPU started while the previous was still loading models (~2–4 min each), or (2) stale GPU processes. Fix:
 
 ```bash
 pkill -f feature_extractor_TVA2_siglip2 || true
-sleep 10
+sleep 15
+bash scripts/probe_gpus.sh          # every GPU must print OK
 bash scripts/run_siglip2_extract_full_train_fast.sh
 ```
 
-The launcher staggers GPU starts by 20 s and passes `--require_cuda` so a bad shard exits instead of running on CPU. Check each log for `Using: cuda`.
+The launcher waits for `SigLIP2 output dim:` in each log before starting the next GPU. Restart one failed shard only:
+
+```bash
+GPU=1 START=83334 COUNT=83334 bash scripts/run_siglip2_fast_one_shard.sh
+```
+
+**CUDA OOM** — lower `--audio_batch_size` and/or `--video_batch_size`.
 
 **`mel input features to be of length 3000, but found 97`**  
 Batched audio was padded only to the longest clip in the mini-batch. Fixed in `qwen_audio_encoder_batched.py` (pads every mel to 3000). `git pull` and restart extraction.
