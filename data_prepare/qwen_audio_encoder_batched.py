@@ -20,6 +20,9 @@ from qwen_audio_encoder import (
     SAMPLE_RATE,
 )
 
+# Qwen2-Audio / Whisper-style mel context (30 s @ 16 kHz).
+QWEN_MEL_MAX_FRAMES = 3000
+
 ArrayLike = Union[np.ndarray, torch.Tensor]
 
 
@@ -64,6 +67,21 @@ class BatchedQwenAudioEncoder(QwenAudioEncoder):
             cache_dir=cache_dir,
         )
         self.batch_size = max(1, int(batch_size))
+        self.mel_max_frames = int(
+            getattr(self.feature_extractor, "nb_max_frames", QWEN_MEL_MAX_FRAMES)
+        )
+
+    def _pad_mel_to_model_length(self, input_features: torch.Tensor) -> torch.Tensor:
+        """Qwen2-Audio expects fixed-length mel (3000 frames), not batch-local padding."""
+        target = self.mel_max_frames
+        t = input_features.shape[-1]
+        if t < target:
+            input_features = torch.nn.functional.pad(
+                input_features, (0, target - t), mode="constant", value=0.0
+            )
+        elif t > target:
+            input_features = input_features[..., :target]
+        return input_features
 
     @torch.no_grad()
     def encode(self, audio: ArrayLike) -> torch.Tensor:
@@ -114,6 +132,7 @@ class BatchedQwenAudioEncoder(QwenAudioEncoder):
         input_features = inputs.input_features.to(
             self.device, dtype=self.audio_tower.dtype
         )
+        input_features = self._pad_mel_to_model_length(input_features)
         encoder_out = self.audio_tower(input_features)
         n_frames = _estimate_output_frames(len(wav), self.max_frames)
         return encoder_out.last_hidden_state[:, :n_frames, :].float().cpu()
@@ -131,6 +150,7 @@ class BatchedQwenAudioEncoder(QwenAudioEncoder):
         input_features = inputs.input_features.to(
             self.device, dtype=self.audio_tower.dtype
         )
+        input_features = self._pad_mel_to_model_length(input_features)
         encoder_out = self.audio_tower(input_features)
         hidden = encoder_out.last_hidden_state.float().cpu()
 

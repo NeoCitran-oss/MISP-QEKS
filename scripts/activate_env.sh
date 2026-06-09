@@ -2,9 +2,18 @@
 # Source before train / feature extraction.
 #   source scripts/activate_env.sh
 #
-# Prefers local venv envs/misp-qeks; falls back to conda (mymisp on tars).
+# Works under bash and zsh. Prefers envs/misp-qeks; falls back to conda mymisp.
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  # zsh: BASH_SOURCE is empty when sourced
+  _ACTIVATE_SRC="${(%):-%x}"
+elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+  _ACTIVATE_SRC="${BASH_SOURCE[0]}"
+else
+  _ACTIVATE_SRC="$0"
+fi
+
+ROOT="$(cd "$(dirname "${_ACTIVATE_SRC}")/.." && pwd)"
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
 
@@ -35,3 +44,5 @@ if [[ -z "${MISP_BASELINE_ROOT:-}" ]]; then
 fi
 echo "MISP_DATA_ROOT=${MISP_DATA_ROOT}"
 echo "MISP_BASELINE_ROOT=${MISP_BASELINE_ROOT}"
+
+unset _ACTIVATE_SRC

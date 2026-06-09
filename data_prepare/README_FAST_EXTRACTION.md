@@ -252,6 +252,9 @@ Install: `pip install decord` — code falls back to torchvision (slower).
 **CUDA OOM**  
 Lower `--audio_batch_size` and/or `--video_batch_size`.
 
+**`mel input features to be of length 3000, but found 97`**  
+Batched audio was padded only to the longest clip in the mini-batch. Fixed in `qwen_audio_encoder_batched.py` (pads every mel to 3000). `git pull` and restart extraction.
+
 **Resume after interrupt**  
 Re-run the same command; existing `.npy` feature files are skipped. Use `--start_index` to skip whole sample ranges for sharded jobs.
 
