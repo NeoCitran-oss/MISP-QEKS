@@ -9,6 +9,8 @@ Run on tars only (not your laptop) — caches and outputs go to /local/scratch.
 Usage (on tars):
   cd data_prepare
   python feature_extractor_TVA2_siglip2.py --prefix eval
+  nohup python feature_extractor_TVA2_siglip2.py --prefix train --batch_size 16 &
+  # logs append to ../results/siglip2_<prefix>.log automatically
 
 Requires:
   pip install "transformers>=4.49.0" pillow
@@ -35,6 +37,8 @@ from paths_config import (  # noqa: E402
     noisy_wav_dir,
     npy_dir,
     raw_scp_path,
+    setup_run_log,
+    siglip2_log_path,
 )
 from siglip2_video_encoder import MATCHER_VIDEO_FEAT_DIM  # noqa: E402
 
@@ -66,10 +70,26 @@ def parse_args():
         action="store_true",
         help="Allow running off tars (downloads HF models to local disk — not recommended)",
     )
+    parser.add_argument(
+        "--log_file",
+        type=str,
+        default=None,
+        help="Append stdout/stderr here (default: <MISP_BASELINE>/results/siglip2_<prefix>.log)",
+    )
+    parser.add_argument(
+        "--no_log_file",
+        action="store_true",
+        help="Do not write a log file (console only)",
+    )
     return parser.parse_args()
 
 
 args = parse_args()
+if not args.no_log_file:
+    log_path = args.log_file or siglip2_log_path(args.prefix)
+    setup_run_log(log_path)
+    print(f"Log file -> {log_path}")
+
 ensure_scratch_execution(allow_local=args.allow_local)
 cache_root = configure_scratch_storage()
 print(f"HF/NLTK cache -> {cache_root}")

@@ -15,6 +15,10 @@ PREFIX="${PREFIX:-eval}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 SIGLIP2_MODEL="${SIGLIP2_MODEL:-google/siglip2-base-patch16-224}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
+NOHUP="${NOHUP:-0}"
+
+mkdir -p results
+LOG_FILE="results/siglip2_${PREFIX}.log"
 
 EXTRA=()
 if [[ "${MAX_SAMPLES}" -gt 0 ]]; then
@@ -31,12 +35,23 @@ print(PREFIX_CONFIG['${PREFIX}']['data_split'])
 PY
 )"
 
-# 2) features
+# 2) features (logs -> results/siglip2_<prefix>.log)
 cd data_prepare
-python feature_extractor_TVA2_siglip2.py \
-  --prefix "${PREFIX}" \
-  --model_id "${SIGLIP2_MODEL}" \
-  --batch_size "${BATCH_SIZE}" \
+RUN=(python feature_extractor_TVA2_siglip2.py
+  --prefix "${PREFIX}"
+  --model_id "${SIGLIP2_MODEL}"
+  --batch_size "${BATCH_SIZE}"
+  --log_file "../${LOG_FILE}"
   "${EXTRA[@]}"
+)
+
+if [[ "${NOHUP}" == "1" ]]; then
+  echo "Starting in background. Tail log: tail -f ${LOG_FILE}"
+  nohup "${RUN[@]}" > /dev/null 2>&1 &
+  echo "PID $!"
+else
+  "${RUN[@]}"
+fi
 
 echo "Done. Video features under features/${PREFIX}/lip_siglip2/"
+echo "Log: ${LOG_FILE}"

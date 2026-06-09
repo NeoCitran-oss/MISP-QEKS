@@ -74,6 +74,40 @@ def data_list_dir() -> str:
     return os.path.join(MISP_BASELINE, "data_list")
 
 
+def results_dir() -> str:
+    """Pipeline logs (feature extraction, train, test). Created on first use."""
+    path = os.path.join(MISP_BASELINE, "results")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def siglip2_log_path(prefix: str) -> str:
+    return os.path.join(results_dir(), f"siglip2_{prefix}.log")
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+
+def setup_run_log(log_path: str) -> str:
+    """Mirror stdout/stderr to log_path (append). Returns the resolved path."""
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    log_file = open(log_path, "a", encoding="utf-8")
+    sys.stdout = _Tee(sys.__stdout__, log_file)
+    sys.stderr = _Tee(sys.__stderr__, log_file)
+    return log_path
+
+
 def hf_cache_root() -> str:
     """Hugging Face / transformers download cache (keep off laptop home dir)."""
     return os.environ.get("HF_CACHE_ROOT", os.path.join(MISP_BASELINE, "hf_cache"))
