@@ -2,8 +2,10 @@
 import argparse
 import glob
 import os
+import sys
 
 import numpy as np
+from tqdm import tqdm
 
 from paths_config import data_split_dir, raw_dict_dir
 
@@ -13,13 +15,20 @@ def build_split(split: str) -> int:
     output_dir = raw_dict_dir(split)
     os.makedirs(output_dir, exist_ok=True)
 
-    wav_files = glob.glob(os.path.join(base_dir, "wav", "*_query.wav"))
+    wav_files = sorted(glob.glob(os.path.join(base_dir, "wav", "*_query.wav")))
     scp_lines = []
-    print(f"[{split}] processing {len(wav_files)} query wav files...")
+    skipped_existing = 0
+    print(f"[{split}] processing {len(wav_files)} query wav files...", flush=True)
 
-    for query_wav in wav_files:
+    for query_wav in tqdm(wav_files, desc=f"preprocess/{split}", file=sys.stdout):
         filename = os.path.basename(query_wav)
         pair_id = filename.replace("_query.wav", "")
+        save_path = os.path.join(output_dir, f"{pair_id}.npy")
+
+        if os.path.exists(save_path):
+            scp_lines.append(save_path + "\n")
+            skipped_existing += 1
+            continue
 
         enroll_wav = os.path.join(base_dir, "wav", f"{pair_id}_enroll.wav")
         query_vid = os.path.join(base_dir, "mp4", f"{pair_id}_query.mp4")
@@ -62,7 +71,6 @@ def build_split(split: str) -> int:
             "type": split,
         }
 
-        save_path = os.path.join(output_dir, f"{pair_id}.npy")
         np.save(save_path, data_dict)
         scp_lines.append(save_path + "\n")
 
@@ -70,7 +78,11 @@ def build_split(split: str) -> int:
     with open(scp_path, "w") as f:
         f.writelines(scp_lines)
 
-    print(f"[{split}] wrote {len(scp_lines)} dicts -> {scp_path}")
+    print(
+        f"[{split}] wrote {len(scp_lines)} dicts "
+        f"(skipped {skipped_existing} existing) -> {scp_path}",
+        flush=True,
+    )
     return len(scp_lines)
 
 

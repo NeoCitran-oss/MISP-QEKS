@@ -14,9 +14,12 @@ The baseline extractor `feature_extractor_TVA2_siglip2.py` processes samples seq
 | `qwen_audio_encoder_batched.py` | Batched Qwen2-Audio encoder (multiple waveforms per forward pass) |
 | `siglip2_video_encoder_fast.py` | Fast SigLIP2 video encoder (decord + threaded prefetch) |
 | `feature_extractor_TVA2_siglip2_fast.py` | End-to-end pipeline using both modules |
-| `../scripts/run_siglip2_extract_fast.sh` | Convenience launcher |
+| `../scripts/run_siglip2_extract_fast.sh` | Single-GPU launcher |
+| `../scripts/run_siglip2_extract_multi_gpu_fast.sh` | **Recommended:** 4-GPU sharded launcher (50k default) |
+| `../scripts/build_partial_train_scp.py` | Build capped `shuf_train.scp` after extraction |
+| `../run_train_siglip2_quick.sh` | Quick train + eval on partial train / eval_inset |
 
-**Original (unchanged):** `feature_extractor_TVA2_siglip2.py`, `qwen_audio_encoder.py`, `siglip2_video_encoder.py`
+**Original (slower):** `feature_extractor_TVA2_siglip2.py`, `../scripts/run_siglip2_extract_multi_gpu.sh`
 
 ---
 
@@ -65,7 +68,8 @@ Outputs remain compatible with training (`run_train_siglip2_quick.sh`, `train.py
 
 ```bash
 cd /path/to/MISP-QEKS
-source scripts/activate_env.sh   # envs/misp-qeks + config/paths.env
+cp config/paths.env.tars.example config/paths.env   # on tars; adjust if needed
+source scripts/activate_env.sh   # envs/misp-qeks or conda mymisp + config/paths.env
 ```
 
 Required packages (already in `requirements.txt` on this branch):
@@ -88,11 +92,45 @@ export MISP_DATA_ROOT="/path/to/MISP-QEKS/data"
 export MISP_BASELINE_ROOT="/path/to/MISP-QEKS"
 ```
 
-On the lab machine (`tars`), defaults in `paths_config.py` point to `/local/scratch/linna/...`.
+On the lab machine (`tars`), defaults in `paths_config.py` point to `/local/scratch/linna/...` even without `paths.env`.
 
 ---
 
 ## How to run
+
+### Recommended on tars — 50k train, 4 GPUs (fast)
+
+Stop any slow baseline jobs first, then:
+
+```bash
+cd /local/scratch/linna/MISP/MISP_baseline/MISP-QEKS
+source scripts/activate_env.sh
+
+GPUS="0,4,5,6" MAX_SAMPLES=50000 bash scripts/run_siglip2_extract_multi_gpu_fast.sh
+```
+
+Shards (~12.5k pairs each):
+
+| GPU | Log |
+|-----|-----|
+| 0 | `results/siglip2_train_fast_gpu0.log` |
+| 4 | `results/siglip2_train_fast_gpu4.log` |
+| 5 | `results/siglip2_train_fast_gpu5.log` |
+| 6 | `results/siglip2_train_fast_gpu6.log` |
+
+Monitor: `tail -f results/siglip2_train_fast_gpu0.log`
+
+When **all four** logs show `Shard done`, train and test:
+
+```bash
+python scripts/build_partial_train_scp.py --max_pairs 50000
+bash run_train_siglip2_quick.sh
+# EER -> test_siglip2_quick/test.log
+```
+
+Full 500k later: `MAX_SAMPLES=0 GPUS="0,4,5,6" bash scripts/run_siglip2_extract_multi_gpu_fast.sh`
+
+---
 
 ### Quick smoke test (10 samples)
 
@@ -145,24 +183,25 @@ python feature_extractor_TVA2_siglip2_fast.py \
 | `--no_rebuild_scp` | off | Skip `shuf_*.scp` rebuild (use for multi-GPU shards) |
 | `--no_log_file` | off | Console only |
 
-### Multi-GPU (manual sharding)
+### Multi-GPU (automated)
 
-Launch one process per GPU with disjoint ranges (same idea as `scripts/run_siglip2_extract_multi_gpu.sh`, but call the **fast** script):
+Use `scripts/run_siglip2_extract_multi_gpu_fast.sh` (see **Recommended on tars** above).
+
+Manual sharding (if needed):
 
 ```bash
+cd data_prepare
 CUDA_VISIBLE_DEVICES=0 python feature_extractor_TVA2_siglip2_fast.py \
-  --prefix train --start_index 0 --max_samples 125000 \
-  --no_rebuild_scp --allow-local &
-
-CUDA_VISIBLE_DEVICES=1 python feature_extractor_TVA2_siglip2_fast.py \
-  --prefix train --start_index 125000 --max_samples 125000 \
-  --no_rebuild_scp --allow-local &
+  --prefix train --start_index 0 --max_samples 12500 \
+  --no_rebuild_scp --log_file ../results/siglip2_train_fast_gpu0.log &
+# repeat for GPUs 4,5,6 with start_index 12500, 25000, 37500
 ```
 
-When all shards finish, rebuild the training list:
+When all shards finish:
 
 ```bash
-python scripts/build_partial_train_scp.py --max_pairs 50000   # or full count
+python scripts/build_partial_train_scp.py --max_pairs 50000
+python scripts/rebuild_shuf_scp.py --prefix train   # optional full merge
 ```
 
 ---
@@ -212,6 +251,9 @@ Install: `pip install decord` — code falls back to torchvision (slower).
 
 **CUDA OOM**  
 Lower `--audio_batch_size` and/or `--video_batch_size`.
+
+**`mel input features to be of length 3000, but found 97`**  
+Batched audio was padded only to the longest clip in the mini-batch. Fixed in `qwen_audio_encoder_batched.py` (pads every mel to 3000). `git pull` and restart extraction.
 
 **Resume after interrupt**  
 Re-run the same command; existing `.npy` feature files are skipped. Use `--start_index` to skip whole sample ranges for sharded jobs.
