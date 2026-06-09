@@ -26,6 +26,7 @@ import wave
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_SCRIPT_DIR, ".."))
 from paths_config import (  # noqa: E402
+    MATCHER_VIDEO_FEAT_DIM,
     NOISE_ROOT,
     PREFIX_CONFIG,
     SIGLIP2_MODEL_ID,
@@ -40,7 +41,6 @@ from paths_config import (  # noqa: E402
     setup_run_log,
     siglip2_log_path,
 )
-from siglip2_video_encoder import MATCHER_VIDEO_FEAT_DIM  # noqa: E402
 
 VIDEO_LIP_SUBDIR = "lip_siglip2"
 
@@ -94,6 +94,21 @@ ensure_scratch_execution(allow_local=args.allow_local)
 cache_root = configure_scratch_storage()
 print(f"HF/NLTK cache -> {cache_root}")
 
+cfg = PREFIX_CONFIG[args.prefix]
+scp_file = raw_scp_path(cfg["data_split"])
+if not os.path.isfile(scp_file):
+    print(
+        f"ERROR: missing {scp_file}\n"
+        f"Build raw dicts first:\n"
+        f"  cd {os.path.join(_SCRIPT_DIR, '..')}\n"
+        f"  python preprocess_all.py --splits {cfg['data_split']}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+with open(scp_file) as f:
+    n_scp_lines = sum(1 for _ in f)
+print(f"Raw scp: {scp_file} ({n_scp_lines} samples)")
+
 import numpy as np
 import torch
 import torchvision
@@ -104,9 +119,6 @@ from qwen_audio_encoder import QwenAudioEncoder
 from siglip2_video_encoder import Siglip2VideoEncoder
 
 random.seed(args.seed)
-
-cfg = PREFIX_CONFIG[args.prefix]
-scp_file = raw_scp_path(cfg["data_split"])
 fea_save_dir = features_dir(args.prefix) + os.sep
 npy_save_dir = npy_dir(args.prefix) + os.sep
 noisy_wav_save_dir = noisy_wav_dir(args.prefix) + os.sep

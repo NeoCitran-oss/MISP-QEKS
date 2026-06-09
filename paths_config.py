@@ -23,6 +23,8 @@ SIGLIP2_MODEL_ID = os.environ.get(
 )
 VIDEO_LIP_SUBDIR_CNN = "lip"
 VIDEO_LIP_SUBDIR_SIGLIP2 = "lip_siglip2"
+# XEQ-Matcher Vide_Proj default input size (CNN lip and projected SigLIP2).
+MATCHER_VIDEO_FEAT_DIM = 256
 BASELINE_CKPT_DIR = os.path.join(MISP_DATA, "train", "model")
 
 # feature-extraction prefix -> preprocess split / dataloader scp stem
