@@ -50,8 +50,13 @@ def parse_args():
     p.add_argument("--prefix", type=str, default="eval", choices=list(PREFIX_CONFIG.keys()))
     p.add_argument("--model_id", type=str, default=SIGLIP2_MODEL_ID)
     p.add_argument("--video_batch_size", type=int, default=32, help="SigLIP2 frames per GPU batch")
-    p.add_argument("--audio_batch_size", type=int, default=8, help="Qwen waveforms per GPU batch")
-    p.add_argument("--video_workers", type=int, default=4, help="CPU threads for video decode prefetch")
+    p.add_argument("--audio_batch_size", type=int, default=4, help="Qwen waveforms per GPU batch")
+    p.add_argument("--video_workers", type=int, default=1, help="CPU threads for video prefetch (1 per GPU process; avoid 4×N GPUs)")
+    p.add_argument(
+        "--no_video_prefetch",
+        action="store_true",
+        help="Decode video synchronously (lower CPU load when many GPU workers run)",
+    )
     p.add_argument(
         "--output_dim",
         type=int,
@@ -92,7 +97,11 @@ from tqdm import tqdm
 
 from g2p.g2p_en.g2p import G2p
 from qwen_audio_encoder_batched import BatchedQwenAudioEncoder, encode_pending_audio
-from siglip2_video_encoder_fast import FastSiglip2VideoEncoder, VideoPrefetcher
+from siglip2_video_encoder_fast import (
+    FastSiglip2VideoEncoder,
+    VideoPrefetcher,
+    read_video_frames_fast,
+)
 
 random.seed(args.seed)
 fea_save_dir = features_dir(args.prefix) + os.sep
@@ -130,7 +139,9 @@ video_enc = FastSiglip2VideoEncoder(
     max_frames=args.max_frames,
     cache_dir=_hf_cache,
 )
-prefetcher = VideoPrefetcher(max_workers=args.video_workers, max_frames=args.max_frames)
+prefetcher = None
+if not args.no_video_prefetch and args.video_workers > 0:
+    prefetcher = VideoPrefetcher(max_workers=args.video_workers, max_frames=args.max_frames)
 print(f"SigLIP2 output dim: {video_enc.feat_dim}")
 
 
@@ -224,9 +235,13 @@ def sample_complete(anc_base, com_base):
 
 def encode_and_save_video(fea_path, cache_key, lip_path):
     if os.path.exists(fea_path):
-        prefetcher.discard(cache_key)
+        if prefetcher is not None:
+            prefetcher.discard(cache_key)
         return
-    frames = prefetcher.get(cache_key)
+    if prefetcher is not None:
+        frames = prefetcher.get(cache_key)
+    else:
+        frames = read_video_frames_fast(lip_path, max_frames=args.max_frames)
     os.makedirs(os.path.dirname(fea_path), exist_ok=True)
     np.save(fea_path, video_enc.encode(frames))
 
@@ -250,7 +265,7 @@ if args.max_samples > 0:
 
 # Prefetch first sample's videos
 def _schedule_pair(idx):
-    if idx >= len(lines):
+    if prefetcher is None or idx >= len(lines):
         return
     s = np.load(lines[idx], allow_pickle=True).item()
     vid_dir = os.path.join(fea_save_dir, VIDEO_LIP_SUBDIR)
@@ -261,7 +276,7 @@ def _schedule_pair(idx):
             prefetcher.schedule(f"{idx}:{side}", lip)
 
 
-for i in range(min(args.video_workers + 1, len(lines))):
+for i in range(min(args.video_workers + 1, len(lines)) if prefetcher else 0):
     _schedule_pair(i)
 
 skipped = 0
@@ -277,8 +292,9 @@ try:
         com_base = os.path.basename(com_wav_p).replace(".wav", "")
 
         if sample_complete(anc_base, com_base):
-            prefetcher.discard(f"{i}:anc")
-            prefetcher.discard(f"{i}:com")
+            if prefetcher is not None:
+                prefetcher.discard(f"{i}:anc")
+                prefetcher.discard(f"{i}:com")
             skipped += 1
             _schedule_pair(i + args.video_workers + 1)
             continue
@@ -365,7 +381,8 @@ try:
             np.save(snr_npy, d)
 
 finally:
-    prefetcher.shutdown()
+    if prefetcher is not None:
+        prefetcher.shutdown()
 
 if args.no_rebuild_scp:
     print(

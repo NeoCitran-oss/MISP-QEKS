@@ -17,12 +17,12 @@ cd "${ROOT}"
 source "${ROOT}/scripts/activate_env.sh"
 
 PREFIX="${PREFIX:-train}"
-GPUS="${GPUS:-0,4,5,1,2,3}"
-MAX_SAMPLES="${MAX_SAMPLES:-500000}" 
-AUDIO_BATCH="${AUDIO_BATCH:-8}"
+GPUS="${GPUS:-0,1,4,5}"
+MAX_SAMPLES="${MAX_SAMPLES:-50000}"
+AUDIO_BATCH="${AUDIO_BATCH:-4}"
 VIDEO_BATCH="${VIDEO_BATCH:-32}"
-VIDEO_WORKERS="${VIDEO_WORKERS:-4}"
-KILL_OLD="${KILL_OLD:-1}"
+VIDEO_WORKERS="${VIDEO_WORKERS:-1}"
+NO_VIDEO_PREFETCH="${NO_VIDEO_PREFETCH:-0}"KILL_OLD="${KILL_OLD:-1}"
 
 mkdir -p results
 
@@ -56,8 +56,7 @@ CHUNK=$(( (WORK_TOTAL + NUM_GPUS - 1) / NUM_GPUS ))
 echo "=== Fast SigLIP2 multi-GPU extraction ==="
 echo "prefix=${PREFIX}  scp_lines=${SCP_TOTAL}  extract_total=${WORK_TOTAL}"
 echo "gpus=${GPUS}  chunk≈${CHUNK}"
-echo "audio_batch=${AUDIO_BATCH}  video_batch=${VIDEO_BATCH}  video_workers=${VIDEO_WORKERS}"
-
+echo "audio_batch=${AUDIO_BATCH}  video_batch=${VIDEO_BATCH}  video_workers=${VIDEO_WORKERS}  no_prefetch=${NO_VIDEO_PREFETCH}"
 cd data_prepare
 PIDS=()
 
@@ -77,6 +76,9 @@ for idx in "${!GPU_ARR[@]}"; do
   LOG="${ROOT}/results/siglip2_${PREFIX}_fast_gpu${GPU}.log"
   SEED=$(( 42 + START ))
 
+  EXTRA=()
+  [[ "${NO_VIDEO_PREFETCH}" == "1" ]] && EXTRA+=(--no_video_prefetch)
+
   echo "GPU ${GPU}: start_index=${START} max_samples=${COUNT} log=${LOG}"
   CUDA_VISIBLE_DEVICES="${GPU}" nohup python feature_extractor_TVA2_siglip2_fast.py \
     --prefix "${PREFIX}" \
@@ -88,8 +90,8 @@ for idx in "${!GPU_ARR[@]}"; do
     --seed "${SEED}" \
     --log_file "${LOG}" \
     --no_rebuild_scp \
+    "${EXTRA[@]}" \
     >/dev/null 2>&1 &
-
   PIDS+=("$!")
   echo "  PID ${PIDS[-1]}"
 done
