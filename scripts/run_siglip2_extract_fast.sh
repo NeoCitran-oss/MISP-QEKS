@@ -9,13 +9,8 @@
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${ROOT}"
-
-if [[ -f "${ROOT}/config/paths.env" ]]; then
-  # shellcheck disable=SC1091
-  source "${ROOT}/config/paths.env"
-fi
-source "${ROOT}/envs/misp-qeks/bin/activate"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/activate_env.sh"
 
 PREFIX="${PREFIX:-eval}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"

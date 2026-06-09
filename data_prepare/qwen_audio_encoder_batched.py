@@ -11,6 +11,7 @@ from typing import Iterable, List, Sequence, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from qwen_audio_encoder import (
     QWEN_AUDIO_FEAT_DIM,
@@ -40,6 +41,27 @@ def _estimate_output_frames(num_samples: int, max_frames: int) -> int:
         return 0
     frames = math.ceil(num_samples / QWEN_AUDIO_FRAME_STRIDE)
     return min(max_frames, frames)
+
+
+def _expected_mel_frames(feature_extractor) -> int:
+    """Whisper-style mel length the Qwen2-Audio tower requires (default 3000)."""
+    nb_max = getattr(feature_extractor, "nb_max_frames", None)
+    if nb_max is not None:
+        return int(nb_max)
+    chunk = getattr(feature_extractor, "chunk_length", 30)
+    hop = getattr(feature_extractor, "hop_length", 160)
+    sr = getattr(feature_extractor, "sampling_rate", SAMPLE_RATE)
+    return int(chunk * sr / hop)
+
+
+def _pad_mel_features(features: torch.Tensor, expected_frames: int) -> torch.Tensor:
+    """Pad or trim mel time axis so every clip matches the fixed encoder input."""
+    cur = features.shape[-1]
+    if cur == expected_frames:
+        return features
+    if cur > expected_frames:
+        return features[..., :expected_frames]
+    return F.pad(features, (0, expected_frames - cur))
 
 
 class BatchedQwenAudioEncoder(QwenAudioEncoder):
@@ -111,9 +133,10 @@ class BatchedQwenAudioEncoder(QwenAudioEncoder):
         inputs = self.feature_extractor(
             wav, sampling_rate=SAMPLE_RATE, return_tensors="pt"
         )
-        input_features = inputs.input_features.to(
-            self.device, dtype=self.audio_tower.dtype
-        )
+        mel_frames = _expected_mel_frames(self.feature_extractor)
+        input_features = _pad_mel_features(
+            inputs.input_features, mel_frames
+        ).to(self.device, dtype=self.audio_tower.dtype)
         encoder_out = self.audio_tower(input_features)
         n_frames = _estimate_output_frames(len(wav), self.max_frames)
         return encoder_out.last_hidden_state[:, :n_frames, :].float().cpu()
@@ -128,9 +151,10 @@ class BatchedQwenAudioEncoder(QwenAudioEncoder):
             return_tensors="pt",
             padding=True,
         )
-        input_features = inputs.input_features.to(
-            self.device, dtype=self.audio_tower.dtype
-        )
+        mel_frames = _expected_mel_frames(self.feature_extractor)
+        input_features = _pad_mel_features(
+            inputs.input_features, mel_frames
+        ).to(self.device, dtype=self.audio_tower.dtype)
         encoder_out = self.audio_tower(input_features)
         hidden = encoder_out.last_hidden_state.float().cpu()
 
