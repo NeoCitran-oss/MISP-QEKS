@@ -11,10 +11,7 @@ import nltk
 from nltk.corpus import cmudict
 
 from nltk import pos_tag
-import sys,os
-# sys.path.append(os.path.dirname(__file__))
-# sys.path.append(os.path.dirname('/train20/intern/permanent/kwli2/udkws/attakws'))
-sys.path.append(os.path.dirname('/work2/asrkws/shicheng2/Multimodal_KWS/dataPrepare/FeatExtract/g2p/g2p_en/cmudict'))
+import sys, os
 
 from nltk.tokenize import TweetTokenizer
 word_tokenize = TweetTokenizer().tokenize
@@ -35,9 +32,7 @@ for tagger_resource in ('averaged_perceptron_tagger_eng', 'averaged_perceptron_t
         nltk.download(tagger_resource)
 
 try:
-    # nltk.data.find('corpora/cmudict.zip')
-    nltk.data.find('/work2/asrkws/shicheng2/Multimodal_KWS/dataPrepare/FeatExtract/g2p/g2p_en/cmudict.zip')
-
+    nltk.data.find('corpora/cmudict')
 except LookupError:
     nltk.download('cmudict')
 
