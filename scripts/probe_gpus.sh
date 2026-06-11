@@ -16,6 +16,7 @@ if [[ "${#GPUS[@]}" -eq 0 ]]; then
 fi
 
 echo "=== CUDA probe (one isolated python process per GPU) ==="
+echo "If this fails, run: bash scripts/diagnose_cuda.sh"
 FAIL=0
 for GPU in "${GPUS[@]}"; do
   echo ""
