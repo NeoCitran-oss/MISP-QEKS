@@ -9,12 +9,15 @@ from sklearn.metrics import roc_curve, roc_auc_score
 from scipy.optimize import brentq
 from scipy.interpolate import interp1d
 
-import whisper
+import librosa
 import difflib
 from tqdm import tqdm
 
 sys.path.append(os.path.dirname(__file__))
+# Reuse the shared Qwen2-Audio audio-encoder backbone from data_prepare/.
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'data_prepare'))
 from dataload import LibriPhraseDataset
+from qwen_audio_encoder import QwenAudioEncoder
 
 a = LibriPhraseDataset()
 # a = LibriPhraseDataset(types = 'easy')
@@ -33,8 +36,7 @@ text_tmp = []
 new_file_scp = []
 # device = 'cpu'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = whisper.load_model("/train20/intern/permanent/kwli2/udkws/tmp1/whisper_models/tiny.pt")
-model = model.to(device)
+qwen_enc = QwenAudioEncoder(model_id="Qwen/Qwen2-Audio-7B", device=device, max_frames=100)
 
 # save_dir = '/train20/intern/temporary/kwli2/udkws/interfea/whisperenc/100h/'
 save_dir = '/train20/intern/temporary/kwli2/udkws/interfea/whisperenc/360h/4word/'
@@ -43,22 +45,12 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 for i in tqdm(range(len(anchor_wav))):
     audio_path_an = anchor_wav[i]
-    audio = whisper.load_audio(audio_path_an)
-    # noise
-    audio = whisper.pad_or_trim(audio)
-    mel = whisper.log_mel_spectrogram(audio).to(model.device)
-    mel = mel.unsqueeze(0)
-    anchor_feature = model.encoder(mel)  # [1, 1500, 384] #[t,c]
-    anchor_feature = anchor_feature.cpu().detach()[:, :100, :]
+    audio, _ = librosa.load(audio_path_an, sr=16000, mono=True)
+    anchor_feature = qwen_enc.encode(audio)  # [1, <=100, 1280] [t, c]
 
     audio_path_com = comparison_wav[i]
-    audio_com = whisper.load_audio(audio_path_com)
-    # noise
-    audio_com = whisper.pad_or_trim(audio_com)
-    mel_com = whisper.log_mel_spectrogram(audio_com).to(model.device)
-    mel_com = mel_com.unsqueeze(0)
-    com_feature = model.encoder(mel_com)  # [1, 1500, 384] #[t,c]
-    com_feature = com_feature.cpu().detach()[:, :100, :]
+    audio_com, _ = librosa.load(audio_path_com, sr=16000, mono=True)
+    com_feature = qwen_enc.encode(audio_com)  # [1, <=100, 1280] [t, c]
 
     data_dict={'anchor_speech':anchor_feature, 'comparison_speech':com_feature, 'anchor_text':anchor_text[i], 'comparison_text':comparison_text[i], 'type':datatype[i], 'label':label[i], 'anchor_path':anchor_wav[i], 'comparison_path':comparison_wav[i]}
     # data_dict={'clean_speech':a_feature, 'noisy_speech':noisy_speech, 'type':datatype[i], 'label':label[i], 'speech_labels':wav_label[i], 'text_labels':text[i]}

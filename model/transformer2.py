@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 class CrossModalAttention(nn.Module):
-    def __init__(self, audio_dim=384, video_dim=256, embed_dim=128):
+    def __init__(self, audio_dim=1280, video_dim=256, embed_dim=128):
         super(CrossModalAttention, self).__init__()
         
         self.W_q = nn.Linear(audio_dim, embed_dim)
@@ -15,7 +15,7 @@ class CrossModalAttention(nn.Module):
 
     def forward(self, audio_embedding, video_embedding):
         """
-        audio_embedding: [1, 384]
+        audio_embedding: [1, audio_dim]
         video_embedding: [T, 256], T is variable
         """
         # 计算 Q, K, V
@@ -31,7 +31,7 @@ class CrossModalAttention(nn.Module):
         attended_video = torch.matmul(attention_probs, V).squeeze(0)  # [embed_dim]
 
         # 将attended_video投影回原始音频维度
-        attended_video_projected = self.final_linear(attended_video)  # [384]
+        attended_video_projected = self.final_linear(attended_video)  # [audio_dim]
 
         # 融合结果
         context_vector = attended_video_projected
@@ -40,7 +40,7 @@ class CrossModalAttention(nn.Module):
         return context_vector
 
 class NoiseReductionMask(nn.Module):
-    def __init__(self, embed_dim=384):
+    def __init__(self, embed_dim=1280):
         super(NoiseReductionMask, self).__init__()
         self.conv1d_1 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, padding=1)
         self.relu = nn.ReLU()
@@ -48,12 +48,12 @@ class NoiseReductionMask(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, context_vector, audio_embedding):
-        x = context_vector.permute(1, 0).unsqueeze(0)  # [1, 384, T]
+        x = context_vector.permute(1, 0).unsqueeze(0)  # [1, embed_dim, T]
         x = self.conv1d_1(x)
         x = self.relu(x)
         x = self.conv1d_2(x)
         mask = self.sigmoid(x)
-        mask = mask.squeeze(0).permute(1, 0)  # [T, 384]
+        mask = mask.squeeze(0).permute(1, 0)  # [T, embed_dim]
         enhanced_audio = audio_embedding * mask + audio_embedding
         return enhanced_audio
 

@@ -1,27 +1,39 @@
 import os
+import sys
 import torch
 import numpy as np
 import random
 import wave
 from tqdm import tqdm
 import torchvision
-import whisper
 from g2p.g2p_en.g2p import G2p
 from lipreading.video_encoder import GrayCropFlip, CNN_Resnet
+from qwen_audio_encoder import QwenAudioEncoder
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import (
+    LIPREADING_CKPT,
+    NOISE_ROOT,
+    PREFIX_CONFIG,
+    features_dir,
+    noisy_wav_dir,
+    npy_dir,
+    raw_scp_path,
+)
 
 seed = 42
 random.seed(seed)
 
-prefix = 'eval' # dev; eval
-scp = f'/local/scratch/linna/MISP/MISP_data/MISP-QEKS/raw_dicts/eval_seen/raw_eval_seen.scp'
-fea_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/features/{prefix}/'
-npy_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/{prefix}/'
-noisy_wav_save_dir = f'/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/noisy_wav/{prefix}/'
+prefix = "eval"
+_cfg = PREFIX_CONFIG[prefix]
+scp = raw_scp_path(_cfg["data_split"])
+fea_save_dir = features_dir(prefix) + "/"
+npy_save_dir = npy_dir(prefix) + "/"
+noisy_wav_save_dir = noisy_wav_dir(prefix) + "/"
 
+snr_list = [5, 0, -5, -10]
 
-snr_list = [5, 0, -5, -10] # for dev & eval [3, 6, 9] for train;  
-
-noise_root = '/local/scratch/linna/MISP/MISP_data/MISP-QEKS/noise'
+noise_root = NOISE_ROOT
 noise_list = ['Home',
               'Music',
               'TV',
@@ -36,11 +48,10 @@ noise_dir_map = {
 
 choose_weights = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70]
 
-# wav encoder
+# wav encoder (Qwen2-Audio audio tower, no LLM)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using:", device)
-whisper_enc = whisper.load_model("/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/whisper/ckps/tiny.pt")
-whisper_enc = whisper_enc.to(device)
+qwen_enc = QwenAudioEncoder(model_id="Qwen/Qwen2-Audio-7B", device=device, max_frames=100)
 
 # text encoder
 g2p = G2p()
@@ -49,7 +60,7 @@ g2p = G2p()
 CNN_Resnet = CNN_Resnet(output_dim=256)
 GrayCropFlip = GrayCropFlip(channel_input='rgb')
 GrayCropFlip.to(device)
-checkpoint_pretrain = torch.load('/local/scratch/linna/MISP/MISP_data/MISP-QEKS/model/lipreading/lipreading_LRW_0.8018.pt', map_location=device)
+checkpoint_pretrain = torch.load(LIPREADING_CKPT, map_location=device)
 CNN_Resnet.load_state_dict(checkpoint_pretrain)
 CNN_Resnet.to(device)
 
@@ -83,15 +94,13 @@ def write_audio(audio_data, audio_name):
     wave_file.close()
     return 0
 
-def AudioEncoder(audio, whisper_enc=whisper_enc):
-    # audio = whisper.load_audio(audio_path)
-    audio = whisper.pad_or_trim(audio)
-    mel = whisper.log_mel_spectrogram(audio).to(whisper_enc.device)
-    mel = mel.unsqueeze(0)
-    audio_embed = whisper_enc.encoder(mel)  # [1, 1500, 384] #[t,c]
-    audio_embed = audio_embed.cpu().detach()[:, :100, :]
+def AudioEncoder(audio, qwen_enc=qwen_enc):
+    # `audio` carries int16 magnitude as float32; normalize to [-1, 1] for the
+    # Qwen feature extractor.
+    audio = np.asarray(audio, dtype=np.float32) / 32768.0
+    audio_embed = qwen_enc.encode(audio)  # [1, <=100, 1280] [t, c]
 
-    return audio_embed
+    return audio_embed.numpy()
 
 def TextEncoder(text, g2p=g2p):
     ang2p = g2p(text)

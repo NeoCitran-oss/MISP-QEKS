@@ -9,7 +9,6 @@ from sklearn.metrics import roc_curve, roc_auc_score
 from scipy.optimize import brentq
 from scipy.interpolate import interp1d
 
-import whisper
 import difflib
 from tqdm import tqdm
 

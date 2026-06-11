@@ -1,0 +1,17 @@
+envs/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+config/paths.env
+data/
+features/
+npy/
+noisy_wav/
+train/model/
+test_epochall/
+res/
+results/*.log
+model/whisper/ckps/
+*.pt
+!model/whisper/assets/**

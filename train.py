@@ -34,7 +34,6 @@ from library.utils.message import Message, LogType, get_log_header
 from library.train_helper import get_module, printer
 
 from tabulate import tabulate
-import whisper
 from model.lipreading import video_encoder
 
 
@@ -113,6 +112,9 @@ class EER(nn.Module):
         return torch.tensor(self.score / self.count)
 
 def validation(model, Val_dataloader):
+    if len(Val_dataloader.dataset) == 0:
+        # No scp/pairs for this split (e.g. eval_outset not prepared) — skip.
+        return [float("nan")], [float("nan")]
     model.eval()
     pred_tva_va = []
 
@@ -149,7 +151,9 @@ def validation(model, Val_dataloader):
 
 def train(args, LOG):
     if args.gpu_world_size > 1:
-        dist.init_process_group("nccl", init_method=args.initmethod, world_size=args.gpu_world_size, rank=args.gpu_global_rank)
+        # gloo: NCCL needs NVML to enumerate every physical GPU and this host has
+        # broken GPUs 6/7 (nvmlDeviceGetHandleByIndex fails) -> ncclSystemError.
+        dist.init_process_group(args.dist_backend, init_method=args.initmethod, world_size=args.gpu_world_size, rank=args.gpu_global_rank)
         logtype=LogType.SYNC
     else:
         logtype=LogType.COMMON
@@ -182,18 +186,30 @@ def train(args, LOG):
 
 
         model = model.cuda()
-        
+
+        if getattr(args, 'resume_from', None):
+            ckpt = torch.load(args.resume_from, map_location='cpu')
+            sd = ckpt.get('state_dict', ckpt)
+            # checkpoints saved from a DDP-wrapped model carry a "module." prefix
+            sd = OrderedDict((k[len('module.'):] if k.startswith('module.') else k, v)
+                             for k, v in sd.items())
+            model.load_state_dict(sd)
+            LOG.log("Resumed weights from {} (start_epoch={})".format(args.resume_from, args.start_epoch),
+                    rank=args.gpu_global_rank, logtype=logtype, syncid=-1, syncheader="resume")
+
         # 初始化优化器
         bmuf = None
         if args.gpu_world_size > 1:
             if args.use_bmuf:
                 bmuf = BMUF(model, args, dist)
             else:
-                model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu_local_rank])
+                # find_unused_parameters: some branches (e.g. modality-specific heads)
+                # do not contribute to the tva_va loss, so their params get no grad.
+                model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu_local_rank], find_unused_parameters=True)
         if args.optimizer == 'ADAM':
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
         elif args.optimizer == 'RANGER':
-            optimizer = Ranger(filter(lambda p: p.requires_grad, model.train_module.parameters()), lr=args.lr)
+            optimizer = Ranger(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
         else:
             optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, momentum=0.9, weight_decay=0.0, nesterov=True)
 
@@ -203,6 +219,9 @@ def train(args, LOG):
             lr_half_epochs = [100000000000]
 
         scheduler = MultiStepLR(optimizer, milestones=lr_half_epochs, gamma=0.5)
+        # fast-forward LR schedule to the resume position
+        for _ in range(args.start_epoch):
+            scheduler.step()
 
         if args.test_snrs:
             test_snr_list = [int(i) for i in args.test_snrs.split(',')]
@@ -497,6 +516,21 @@ def start_train(args):
     log += get_log_header("Dataset Summary")
         
 
+    resume_from = None
+    resume_start_epoch = 0
+    if args.resume:
+        ckpts = glob.glob(os.path.join(args.out_dir, 'epoch*.pth'))
+        if ckpts:
+            def _epoch_num(p):
+                return int(os.path.basename(p)[len('epoch'):-len('.pth')])
+            resume_from = max(ckpts, key=_epoch_num)
+            resume_start_epoch = _epoch_num(resume_from) + 1
+            if args.rank == 0:
+                LOG.log("--resume: latest checkpoint {} -> continuing at epoch {}".format(
+                    resume_from, resume_start_epoch))
+        elif args.rank == 0:
+            LOG.log("--resume: no epoch*.pth in {} - starting fresh".format(args.out_dir))
+
     ctx = mp.get_context('spawn')
     message_queue = ctx.Queue()
 
@@ -505,7 +539,8 @@ def start_train(args):
         subargs = copy.deepcopy(args)
         subargs.gpu_local_rank = gpu_local_rank
         subargs.gpu_global_rank = subargs.rank * subargs.gpu_num + gpu_local_rank
-        subargs.start_epoch = 0
+        subargs.start_epoch = resume_start_epoch
+        subargs.resume_from = resume_from
         subargs.end_epoch = subargs.epochs
         p = ctx.Process(target=train_warper, args=(subargs, message_queue, LOG,))
         p.start()
@@ -537,7 +572,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--train_csv',    type=str, default='train')
     parser.add_argument('--eval_csv',     type=str, default='eval_inset,eval_outset')
-    parser.add_argument('--datalist_dir', type=str, default='/work2/asrkws/shicheng2/Multimodal_KWS/data_list', help='Path where the scp stored')
+    parser.add_argument('--datalist_dir', type=str, default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/data_list', help='Path where the scp stored')
 
     parser.add_argument('--prob_addNoise',  type=float, default=0.5, help='probability of adding noise')
 
@@ -545,7 +580,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr',             type=float, default=0.001, help='Learning rate for train')
     parser.add_argument('--epochs',         type=int,   default=8, help='Number of training epochs')
     parser.add_argument('--batch_size',     type=int,   default=16, help='Max sentence number used for training and testing')
-    parser.add_argument('--network',        type=str,   default='mmKWS_PLCL_4data', help='Deep learning model architecture used')
+    parser.add_argument('--network',        type=str,   default='TVA_KWS_PLCL_AVmask', help='Deep learning model architecture used')
     parser.add_argument('--lr_half_epochs', type=str,   default='2,3,4,5,6,7,8,9', help='Index of training epoch to half learning rate, eg: 3,4,5,6,7')
     parser.add_argument('--seed',           type=int,   default=27863875, help='Seed for init pytorch network and dataloader')
     parser.add_argument('--net_init_seed',  type=int,   default=27863875, help='Seed for init pytorch network, especially for multigpu init')
@@ -555,6 +590,8 @@ if __name__ == "__main__":
     parser.add_argument('--log_path', type=str, default='./train/0_train.log', help='Path to where the output log will be')
 
     parser.add_argument('--use_bmuf', action='store_true')
+    parser.add_argument('--resume', action='store_true', help='Resume from the latest epochN.pth in --out_dir (continues at epoch N+1, restores LR schedule)')
+    parser.add_argument('--dist_backend', type=str, default='gloo', choices=['nccl', 'gloo'], help='DDP backend; gloo avoids NVML (broken GPUs 6/7 on this host)')
     parser.add_argument('--gpu_num',  type=int, default=None, help='Gpu number, auto get by torch.cuda.device_count() if not set')
 
     parser.add_argument('--maxlen_text', type=int, default=40, help='maxlen_text')

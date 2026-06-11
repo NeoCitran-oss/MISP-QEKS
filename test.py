@@ -35,7 +35,6 @@ from library.utils.message import Message, LogType, get_log_header
 from library.train_helper import get_module, printer
 
 from tabulate import tabulate
-import whisper
 from model.lipreading import video_encoder
 
 
@@ -190,7 +189,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--test_snrs',     type=str,   default='0,5,10')
     parser.add_argument('--eval_csv',      type=str,   default='eval_inset,eval_outset')
-    parser.add_argument('--datalist_dir',  type=str,   default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/npy/eval')
+    parser.add_argument('--datalist_dir',  type=str,   default='/local/scratch/linna/MISP/MISP_baseline/MISP-QEKS/data_list')
     parser.add_argument('--prob_addNoise', type=float, default=1.0)
     parser.add_argument('--batch_size',     type=int,   default=16, help='Max sentence number used for training and testing')
     parser.add_argument('--bgn_epoch',     type=int,   default=2)
@@ -200,7 +199,7 @@ if __name__ == "__main__":
     parser.add_argument('--net_init_seed', type=int,   default=27863875)
 
     parser.add_argument('--out_dir',       type=str,   default='./test')
-    parser.add_argument('--model_path',    type=str,   default='./train/cfg1/model/')
+    parser.add_argument('--model_path',    type=str,   default='/local/scratch/linna/MISP/MISP_data/MISP-QEKS/train/model/')
 
     parser.add_argument('--maxlen_text',   type=int,   default=40)
     parser.add_argument('--maxlen_vide',   type=int,   default=50)
