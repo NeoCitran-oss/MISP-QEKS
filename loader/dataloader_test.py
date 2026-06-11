@@ -18,6 +18,24 @@ sys.path.append(os.path.dirname(__file__))
 from audio_path_utils import filter_scp_for_clean, resolve_com_audi_fea_path
 
 
+def load_fea(path):
+    """Load a (T, C) feature; tolerate legacy (1, T, C) layouts."""
+    arr = np.load(path)
+    if arr.ndim == 3 and arr.shape[0] == 1:
+        arr = arr[0]
+    return arr
+
+
+def pad_fea_to_len(fea, maxlen):
+    """Zero-pad/truncate a (T, C) tensor to (maxlen, C)."""
+    T, C = fea.shape
+    if T < maxlen:
+        out = torch.zeros((maxlen, C), dtype=fea.dtype)
+        out[:T] = fea
+        return out
+    return fea[:maxlen]
+
+
 class LipReading2Dataset(Dataset):
     def __init__(self,
                  rank, 
@@ -119,9 +137,9 @@ class LipReading2Dataset(Dataset):
 
         ## Text feature
         anc_phn_list = feature_data['anc_phn_list']
-        anc_text_fea = feature_data['anc_text_fea']
+        anc_text_fea = torch.as_tensor(feature_data['anc_text_fea'])
         com_phn_list = feature_data['com_phn_list']
-        com_text_fea = feature_data['com_text_fea']
+        com_text_fea = torch.as_tensor(feature_data['com_text_fea'])
 
         if not torch.is_tensor(anc_text_fea):
             anc_text_fea = torch.from_numpy(np.asarray(anc_text_fea))
@@ -206,7 +224,7 @@ class LipReading2Dataset(Dataset):
 
 
         ## audio feature
-        anc_audi_fea = np.load(feature_data['anc_audi_fea_path']).squeeze(0)
+        anc_audi_fea = load_fea(feature_data['anc_audi_fea_path'])
         anc_audi_fea = torch.tensor(anc_audi_fea).cpu().detach()
 
         if self.train:
@@ -215,12 +233,12 @@ class LipReading2Dataset(Dataset):
                 com_audi_fea_path = resolve_com_audi_fea_path(
                     feature_data['com_audi_fea_path'], snr
                 )
-                com_audi_fea = np.load(com_audi_fea_path).squeeze(0)
+                com_audi_fea = load_fea(com_audi_fea_path)
             else:
-                com_audi_fea = np.load(feature_data['com_audi_fea_path']).squeeze(0)
+                com_audi_fea = load_fea(feature_data['com_audi_fea_path'])
         else:
             if self.snr_list is None:
-                com_audi_fea = np.load(feature_data['com_audi_fea_path']).squeeze(0)
+                com_audi_fea = load_fea(feature_data['com_audi_fea_path'])
             else:
                 snr = self.snr_list[0]
                 com_audi_fea_path = resolve_com_audi_fea_path(
@@ -231,46 +249,46 @@ class LipReading2Dataset(Dataset):
                         com_audi_fea_path = com_audi_fea_path.replace(
                             type_string, f'/test/{snr}db/'
                         )
-                com_audi_fea = np.load(com_audi_fea_path).squeeze(0)
+                com_audi_fea = load_fea(com_audi_fea_path)
         
         com_audi_fea = torch.tensor(com_audi_fea).cpu().detach()
 
-        _, _, anc_wav = self.__read_audio__(feature_data['anc_wav_path'])
-        _, _, com_wav = self.__read_audio__(feature_data['com_wav_path'])
-        anc_wav = anc_wav[:self.maxlen_audi*20*160] # B, T <= 32000
-        com_wav = com_wav[:self.maxlen_audi*20*160]
-        
         ## fa
-        anc_fa_path = feature_data['anc_wav_path'].replace('/wav/', '/fa_data/').replace('_wav', '').replace('.wav', '.TextGrid')
-        com_fa_path = feature_data['com_wav_path'].replace('/wav/', '/fa_data/').replace('_wav', '').replace('.wav', '.TextGrid')
+        anc_fa_path = feature_data['anc_wav_path'].replace('/wav/', '/fa/').replace('_wav', '').replace('.wav', '.TextGrid')
+        com_fa_path = feature_data['com_wav_path'].replace('/wav/', '/fa/').replace('_wav', '').replace('.wav', '.TextGrid')
 
-        ##  audio
-        k_anc = math.ceil(len(anc_wav) / 320) # 16khz 音频数据，/320对应分辨率20ms，也即self.audio_fps = 50
-        k_com = math.ceil(len(com_wav) / 320)
-        anc_audi_mask = torch.ones((self.maxlen_audi, 1)) # 最长100帧，也即2s音频，训练测试数据基本在此限制内
+        ##  audio: mask length from the actual embedding frames so it stays
+        ##  correct for any encoder frame rate (qwen2 25 Hz, qwen3 12.5 Hz).
+        k_anc = min(anc_audi_fea.shape[0], self.maxlen_audi)
+        k_com = min(com_audi_fea.shape[0], self.maxlen_audi)
+        anc_audi_mask = torch.ones((self.maxlen_audi, 1))
         anc_audi_mask[k_anc:, :] = 0
         com_audi_mask = torch.ones((self.maxlen_audi, 1))
         com_audi_mask[k_com:, :] = 0
 
+        # model multiplies fea * mask, so audio must be fixed-length like video
+        anc_audi_fea = pad_fea_to_len(anc_audi_fea, self.maxlen_audi)
+        com_audi_fea = pad_fea_to_len(com_audi_fea, self.maxlen_audi)
+
         ## label
         label = feature_data['label']
         if self.train:
-            clean_com_audi_fea = np.load(feature_data['com_audi_fea_path']).squeeze(0)
+            clean_com_audi_fea = load_fea(feature_data['com_audi_fea_path'])
             clean_com_audi_fea = torch.tensor(clean_com_audi_fea).cpu().detach()
+            clean_com_audi_fea = pad_fea_to_len(clean_com_audi_fea, self.maxlen_audi)
 
-            if 'type' in feature_data.keys():
-                datatype = feature_data['type']
-            else:
-                if feature_data['anc_text'] == feature_data['com_text']:
-                    datatype = "diffspk_positive"
+            datatype = feature_data.get('type')
+            if datatype not in ("diffspk_positive", "positive", "diffspk_easyneg",
+                                "easy_negative", "diffspk_hardneg", "hard_negative"):
+                # MISP-QEKS raw dicts carry the split tag ("train") here; fall
+                # back to the binary label (hard negatives are unidentifiable).
+                datatype = "positive" if label == 1 else "easy_negative"
             if datatype == "diffspk_positive" or datatype == "positive":  # 正例，注册与查询文本完全一致，来自不同说话人
                 label_3 = 1
             elif datatype == 'diffspk_easyneg' or datatype == 'easy_negative': # 负例，注册与查询文本较不一致，来自不同说话人
                 label_3 = 0
-            elif datatype == 'diffspk_hardneg' or datatype == 'hard_negative': # 负例，注册与查询文本相似但不一致，来自不同说话人
-                label_3 = 2
             else:
-                print("Wrong datatype:", datatype)
+                label_3 = 2
 
             return anc_audi_fea, anc_audi_mask, com_audi_fea, com_audi_mask, anc_phn_list, anc_text_fea, anc_text_mask, com_phn_list, com_text_fea, com_text_mask, anc_vide_fea, anc_vide_mask, com_vide_fea, com_vide_mask, anc_fa_path, com_fa_path, label, clean_com_audi_fea, label_3
 
